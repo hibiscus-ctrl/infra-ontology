@@ -57,7 +57,7 @@ Below the checker, the session is locked, so a query that got past it would stil
 
 - the snapshot's Parquet files are read into tables first, and the settings that cannot change later (no extension install or load, no community or unsigned extensions, no temp directory, memory limit, threads) are in the connection string;
 - `enable_external_access` is turned off with **no allowed paths or directories**, then `lock_configuration` is turned on. No file can be read or written, nothing can be attached, installed or loaded, and no setting can be changed back. DuckDB's `allowed_directories` and `allowed_paths` are deliberately not used: both still let a `COPY` overwrite an allowed file;
-- a long-lived session (the MCP server, later) loads the tables into a private database file, attaches it read-only, and deletes the file, so the engine itself refuses every write to the data and the catalog. A one-shot `query` copies the snapshot into memory tables, which opens faster.
+- a long-lived session (the [MCP server](mcp.md)) loads the tables into a private database file, attaches it read-only, and deletes the file, so the engine itself refuses every write to the data and the catalog. A one-shot `query` copies the snapshot into memory tables, which opens faster.
 
 The tests prove the lock without the checker in front of it: `COPY`, `EXPORT DATABASE`, `read_csv`, `glob`, `INSTALL`, `LOAD`, `ATTACH`, `SET` and `RESET` after the lock all fail, and the snapshot folder is byte-for-byte the same afterwards.
 
@@ -87,7 +87,7 @@ Named, versioned SQL files in `queries/`, compiled into the binary. The header s
 -- param: depth int[0..50] 5 How many hops to follow
 ```
 
-A parameter is `string` or `int` (optionally `int[lo..hi]`), with a default, `required`, or `-` for an optional filter that defaults to empty. A string is written into the query as a quoted literal, an integer as a checked number; a value cannot add SQL. The rendered text goes through the same checker as any other. The stored queries are `blast` and `cone` (a node by id, Terraform address, ARN or path, or native id, and a depth), `unmanaged` (resources in the inventory that no state holds) and `summary` (nodes by kind and managed status). `query --list` prints them with their parameters.
+A parameter is `string` or `int` (optionally `int[lo..hi]`), with a default, `required`, or `-` for an optional filter that defaults to empty. A string is written into the query as a quoted literal, an integer as a checked number; a value cannot add SQL. The rendered text goes through the same checker as any other. The stored queries are `blast` and `cone` (a node by id, Terraform address, ARN or path, or native id, and a depth), `unmanaged` (resources in the inventory that no state holds), `summary` (nodes by kind and managed status) and `inventory` (the nodes in a fixed order, filtered by type, account, environment, module and address prefix, with an offset for paging: what the MCP `inventory` tool runs). `query --list` prints them with their parameters.
 
 ## The citation
 
