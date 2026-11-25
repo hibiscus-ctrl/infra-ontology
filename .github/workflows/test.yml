@@ -63,9 +63,11 @@ jobs:
             echo "the snapshot code imports the query engine" >&2
             exit 1
           fi
+      # gRPC is not checked: snapshot signing (sigstore-go) links it in every
+      # build. The cloud SDKs and the GCS client are.
       - name: Check the default build links no cloud SDK
         run: |
-          if go list -deps ./cmd/infra-ontology | grep -E 'aws-sdk-go|google.golang.org/api|Azure/azure-sdk-for-go|google.golang.org/grpc'; then
+          if go list -deps ./cmd/infra-ontology | grep -E 'aws-sdk-go|google.golang.org/api|Azure/azure-sdk-for-go|cloud.google.com/go/storage'; then
             echo "the default build links a cloud SDK: a store is not behind its build tag" >&2
             exit 1
           fi
@@ -102,9 +104,11 @@ jobs:
             echo "the noduckdb build depends on the engine" >&2
             exit 1
           fi
+      # gRPC is not checked: snapshot signing (sigstore-go) links it in every
+      # build. The cloud SDKs and the GCS client are.
       - name: Check the default build links no cloud SDK
         run: |
-          if go list -deps -tags noduckdb ./cmd/infra-ontology | grep -E 'aws-sdk-go|google.golang.org/api|Azure/azure-sdk-for-go|google.golang.org/grpc'; then
+          if go list -deps -tags noduckdb ./cmd/infra-ontology | grep -E 'aws-sdk-go|google.golang.org/api|Azure/azure-sdk-for-go|cloud.google.com/go/storage'; then
             echo "the default build links a cloud SDK: a store is not behind its build tag" >&2
             exit 1
           fi
