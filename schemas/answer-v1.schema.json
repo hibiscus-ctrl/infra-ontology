@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hibiscus-ctrl.github.io/infra-ontology/schemas/answer-v1.schema.json",
+  "title": "infra-ontology answer, v1",
+  "description": "The citation record that comes with every answer: the query, the snapshot it ran against, the engine, the size and hash of the result, and the limits of the data. An answer is evidence, not a claim: a reader can re-run the query against the snapshot and compare result_hash.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["query", "query_hash", "snapshot_id", "dialect", "engine", "row_count", "truncated", "result_hash", "limits"],
+  "properties": {
+    "query": {"description": "The SQL that ran.", "type": "string", "minLength": 1},
+    "query_hash": {"description": "sha256: and the hex SHA-256 of the normalised query text and its parameters.", "type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "stored_query": {"description": "The name of the stored query, if the query came from queries/.", "type": "string"},
+    "snapshot_id": {"description": "The snapshot_id of the snapshot the query ran against.", "type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "dialect": {"description": "The SQL dialect, for example infra-ontology/sql/v1.", "type": "string"},
+    "engine": {"description": "The engine and its version, for example duckdb 1.2.0.", "type": "string"},
+    "row_count": {"description": "The number of rows returned.", "type": "integer", "minimum": 0},
+    "truncated": {"description": "True if the row cap cut the result.", "type": "boolean"},
+    "result_hash": {"description": "sha256: and the hex SHA-256 of the result in a canonical form.", "type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "limits": {
+      "description": "What the data behind the answer cannot tell you.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["failed_sources"],
+      "properties": {
+        "oldest_source": {"description": "When the oldest source was read.", "type": "string", "format": "date-time"},
+        "failed_sources": {"description": "The number of sources that did not read in full.", "type": "integer", "minimum": 0},
+        "uncovered_types": {"description": "Types the snapshot could not read.", "type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}
