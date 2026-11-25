@@ -8,7 +8,7 @@ It runs on your laptop or in your CI, with your own credentials. It holds no sec
 
 ## Status
 
-**Early: not yet usable.** The repository holds the licences, the checks and the release skeleton, and a command that prints its version. The snapshot format, the state and inventory readers, the query layer and the MCP server are planned and land in later changes. Nothing here is stable, and the name and the module path may still change.
+**Early: not yet usable on a real estate.** The snapshot format is written: the JSON Schemas, a pure-Go Parquet writer with stable bytes and a content-addressed manifest, `snapshot verify` and `diff`. The state and inventory readers, the query layer and the MCP server are planned and land in later changes, so for now a snapshot can only be built from a JSON file (`snapshot build --from-json`, a path for tests and development). Nothing here is stable, and the name and the module path may still change.
 
 ## What it will do
 
@@ -33,6 +33,10 @@ You need Go (the version in `go.mod`).
 make build        # builds ./infra-ontology
 ./infra-ontology version
 make test
+
+# a snapshot is a folder; these work offline
+./infra-ontology snapshot verify <snapshot-folder>   # check a snapshot against its manifest, offline
+./infra-ontology diff <a> <b>                       # what changed from snapshot a to snapshot b
 ```
 
 ## Contributing
