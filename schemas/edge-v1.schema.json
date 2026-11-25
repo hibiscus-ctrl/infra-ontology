@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hibiscus-ctrl.github.io/infra-ontology/schemas/edge-v1.schema.json",
+  "title": "infra-ontology edge, v1",
+  "description": "One row of edges.parquet, in its JSON Lines form: a typed link between two nodes. The edge reads from refers to, or depends on, to. So what breaks if X changes follows edges backwards from X.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["edge_id", "from_id", "to_id", "kind", "confidence", "basis", "source_id"],
+  "properties": {
+    "edge_id": {
+      "description": "The hex SHA-256 of the kind, from_id and to_id.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "from_id": {
+      "description": "The node_id the edge starts at.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "to_id": {
+      "description": "The node_id the edge points to.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "kind": {
+      "description": "The edge kind. v0 writes depends_on, contained_in, defined_in and reads_state_of; later minor versions may add kinds, so readers accept an unknown one.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "confidence": {
+      "description": "How the edge was learned: observed in a source, computed from read data, or inferred.",
+      "enum": ["observed", "computed", "inferred"]
+    },
+    "basis": {
+      "description": "A short code for why the edge exists, for example state_dependency, module_containment, remote_state, catalogue_child or resource_path. Open to additions in a minor version.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "source_id": {
+      "description": "The source the edge came from (a source_id in sources.parquet).",
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

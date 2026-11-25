@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hibiscus-ctrl.github.io/infra-ontology/schemas/node-v1.schema.json",
+  "title": "infra-ontology node, v1",
+  "description": "One row of nodes.parquet, in its JSON Lines form: one real thing (a resource, a module call, a state root, an account or a placeholder for something referenced but not read). It carries identifiers, never attribute values. Empty optional strings are omitted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["node_id", "kind", "managed_status", "confidence", "source_id"],
+  "properties": {
+    "node_id": {
+      "description": "Stable identifier: the hex SHA-256 of the kind, cloud, account, region, type and native id (or its HMAC when ids are hashed).",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "kind": {
+      "description": "What the node is.",
+      "enum": ["resource", "module_call", "state_root", "account", "external"]
+    },
+    "cloud": {
+      "description": "The cloud, for example aws, azure or gcp. Empty for a node that is not in a cloud.",
+      "type": "string"
+    },
+    "account": {
+      "description": "The scope: an AWS account, an Azure subscription or a Google project.",
+      "type": "string"
+    },
+    "region": {
+      "description": "The region or location, where the resource has one.",
+      "type": "string"
+    },
+    "tf_type": {
+      "description": "The Terraform resource type, where known, for example aws_s3_bucket.",
+      "type": "string"
+    },
+    "inventory_type": {
+      "description": "The type in the live inventory, where known, for example AWS::S3::Bucket.",
+      "type": "string"
+    },
+    "native_id": {
+      "description": "The identifier the cloud or the state gives the thing.",
+      "type": "string"
+    },
+    "arn_or_path": {
+      "description": "The ARN, the Azure resource ID or the Google resource path, where known.",
+      "type": "string"
+    },
+    "name": {
+      "description": "A display name.",
+      "type": "string"
+    },
+    "address": {
+      "description": "The Terraform address, for example module.net.aws_vpc.main[0]. Empty when Terraform does not manage the thing.",
+      "type": "string"
+    },
+    "module": {
+      "description": "The module path of the address, for example module.net. Empty at the root.",
+      "type": "string"
+    },
+    "root": {
+      "description": "The state source (a state root) that holds the node.",
+      "type": "string"
+    },
+    "managed_status": {
+      "description": "Whether Terraform manages the thing.",
+      "enum": ["managed", "other_iac", "unmanaged", "unknown"]
+    },
+    "environment": {
+      "description": "The environment the node belongs to, for example prod or staging, where known.",
+      "type": "string"
+    },
+    "tags": {
+      "description": "Tags, after the secret detectors. The one kind of value a snapshot keeps. In Parquet the column is a list of key and value pairs sorted by key.",
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "confidence": {
+      "description": "How the node was learned: read directly, computed from read data, or inferred.",
+      "enum": ["observed", "computed", "inferred"]
+    },
+    "source_id": {
+      "description": "The source the node came from (a source_id in sources.parquet).",
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

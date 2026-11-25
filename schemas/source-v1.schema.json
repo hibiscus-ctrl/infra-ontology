@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hibiscus-ctrl.github.io/infra-ontology/schemas/source-v1.schema.json",
+  "title": "infra-ontology source, v1",
+  "description": "One row of sources.parquet, in its JSON Lines form: where a set of facts came from, and when. A source that failed or was partial is recorded, so the snapshot never silently shrinks the estate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source_id", "kind", "status", "collected_at"],
+  "properties": {
+    "source_id": {
+      "description": "The identifier nodes and edges cite.",
+      "type": "string",
+      "minLength": 1
+    },
+    "kind": {
+      "description": "What kind of document the source is.",
+      "enum": ["state", "inventory", "plan"]
+    },
+    "backend": {
+      "description": "The backend or store the document was read from, for example s3, gcs, azblob, hcp or local.",
+      "type": "string"
+    },
+    "location": {
+      "description": "Where the document was read from. Hashed when ids are hashed.",
+      "type": "string"
+    },
+    "workspace": {
+      "description": "The Terraform workspace, for a state.",
+      "type": "string"
+    },
+    "serial": {
+      "description": "The state serial, for a state.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "lineage": {
+      "description": "The state lineage, for a state.",
+      "type": "string"
+    },
+    "terraform_version": {
+      "description": "The Terraform version that wrote the state.",
+      "type": "string"
+    },
+    "document_sha256": {
+      "description": "The hex SHA-256 of the document that was read, so a reader can tell whether it has changed since.",
+      "type": "string",
+      "pattern": "^([0-9a-f]{64})?$"
+    },
+    "collected_at": {
+      "description": "When the document was read, in UTC, as RFC 3339.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "collector": {
+      "description": "The tool that read the document.",
+      "type": "string"
+    },
+    "collector_version": {
+      "description": "The version of that tool.",
+      "type": "string"
+    },
+    "status": {
+      "description": "ok when the document was read in full, partial when part of it was not, failed when none of it was.",
+      "enum": ["ok", "partial", "failed"]
+    },
+    "reason": {
+      "description": "Why a source is partial or failed. Empty when ok.",
+      "type": "string"
+    }
+  }
+}

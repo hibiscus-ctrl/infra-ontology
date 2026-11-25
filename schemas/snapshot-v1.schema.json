@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hibiscus-ctrl.github.io/infra-ontology/schemas/snapshot-v1.schema.json",
+  "title": "infra-ontology snapshot manifest, v1",
+  "description": "manifest.json of a snapshot: what is in it, with the hash of every table. snapshot_id is the hex SHA-256 of the manifest with its snapshot_id member removed, in canonical form (member names sorted, no white space), so a change to any byte of any table changes the id.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "format_minor", "snapshot_id", "parent_id", "label", "created_at", "tool", "status", "tables", "sources_summary", "redaction", "coverage", "limits"],
+  "properties": {
+    "format": {
+      "description": "The format and its major version. A reader rejects a higher major.",
+      "const": "infra-ontology/snapshot/v1"
+    },
+    "format_minor": {
+      "description": "The minor version. Additive changes only within a major: a reader accepts an unknown column or kind.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "snapshot_id": {
+      "description": "The content hash of the manifest, which names the hash of every table.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "parent_id": {
+      "description": "The snapshot_id of the snapshot this one follows. Empty for a first snapshot.",
+      "type": "string",
+      "pattern": "^([0-9a-f]{64})?$"
+    },
+    "label": {
+      "description": "A free-text name the user gave the snapshot, for example before-upgrade. Empty if none.",
+      "type": "string"
+    },
+    "created_at": {
+      "description": "When the snapshot was written, in UTC, as RFC 3339. The writer is given it rather than reading the clock, so the same input and time give the same bytes. It is part of the hash.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "tool": {
+      "description": "The tool that wrote the snapshot.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"type": "string"},
+        "version": {"type": "string"}
+      }
+    },
+    "status": {
+      "description": "ok when every source was read in full, partial when any source was partial or failed.",
+      "enum": ["ok", "partial"]
+    },
+    "tables": {
+      "description": "The tables, sorted by name.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "file", "sha256", "rows", "schema"],
+        "properties": {
+          "name": {"enum": ["edges", "nodes", "sources"]},
+          "file": {"description": "The file name, relative to the snapshot folder.", "type": "string", "pattern": "^[a-z]+\\.parquet$"},
+          "sha256": {"description": "The hex SHA-256 of the file.", "type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "rows": {"type": "integer", "minimum": 0},
+          "schema": {"description": "The row schema, for example infra-ontology/node/v1.", "type": "string"}
+        }
+      }
+    },
+    "sources_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["count", "by_kind"],
+      "properties": {
+        "count": {"type": "integer", "minimum": 0},
+        "by_kind": {
+          "description": "The number of sources of each kind.",
+          "type": "object",
+          "additionalProperties": {"type": "integer", "minimum": 1}
+        },
+        "oldest_collected_at": {"type": "string", "format": "date-time"},
+        "newest_collected_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "redaction": {
+      "description": "What was hidden before the snapshot was written. Same block shape as infraharvest's exports.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash_algorithm", "ids_hashed", "addresses_dropped", "tag_keys_dropped", "all_tags_dropped"],
+      "properties": {
+        "hash_algorithm": {"description": "The algorithm ids were hashed with. none when they were not.", "enum": ["none", "hmac-sha256"]},
+        "ids_hashed": {"type": "boolean"},
+        "addresses_dropped": {"type": "boolean"},
+        "tag_keys_dropped": {
+          "description": "The tag keys that were dropped, sorted.",
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "all_tags_dropped": {"type": "boolean"}
+      }
+    },
+    "coverage": {
+      "description": "What the snapshot covers, and what it could not read.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clouds", "accounts", "types", "failed_sources"],
+      "properties": {
+        "clouds": {"type": "array", "items": {"type": "string"}},
+        "accounts": {"type": "array", "items": {"type": "string"}},
+        "types": {"description": "The Terraform types the nodes have, sorted.", "type": "array", "items": {"type": "string"}},
+        "failed_sources": {
+          "description": "The sources that did not read in full, each with the reason.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source_id", "status", "reason"],
+            "properties": {
+              "source_id": {"type": "string"},
+              "status": {"enum": ["partial", "failed"]},
+              "reason": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "limits": {
+      "description": "Plain text on what the snapshot cannot tell you.",
+      "type": "string"
+    }
+  }
+}
