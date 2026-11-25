@@ -1,6 +1,6 @@
 # Architecture
 
-This is a short summary of how infra-ontology is meant to work. The snapshot (its format, writer, verify and diff) is written; ingest, the query layer and the MCP server are still the plan, and each says so. The details will move into their own pages as the parts land.
+This is a short summary of how infra-ontology is meant to work. The snapshot (its format, writer, verify and diff) and the query layer are written; ingest and the MCP server are still the plan, and each says so. The details will move into their own pages as the parts land.
 
 ## The idea
 
@@ -50,7 +50,13 @@ A source that fails does not silently shrink the estate: the snapshot is marked 
 
 ## Query
 
-DuckDB, embedded, over views on the Parquet files. The dialect is restricted to read-only `SELECT`, with row caps, and checked in layers. The query layer will also check an answer against its hashes, offline (`verify --answer`). `snapshot verify` and `diff` already exist and need no DuckDB.
+This part is written (`internal/query`, with the stored queries in `queries/`); see [query.md](query.md) for the dialect, the caps and the citation in full.
+
+DuckDB, embedded, behind a small interface (`Engine` opens a `Session`; `Session.Query` checks, caps and runs one query). The snapshot's Parquet files are read into tables; then file access is turned off with no allowed paths and the configuration is locked, so a session cannot read or write a file, load an extension or change a setting. A long-lived session attaches its tables read-only. A query is never run as written: DuckDB parses it to a JSON tree, a pure-Go checker allows one `SELECT` or `WITH ... SELECT` over `nodes`, `edges`, `sources`, `snapshot` and the `blast` and `cone` macros and nothing else (an allow-list of node kinds, expression classes, functions and tables), and DuckDB writes the checked tree back as the canonical SQL that runs and that the answer cites. The result is capped by rows (`LIMIT cap + 1`, so truncation is known without a second query), columns, bytes and time.
+
+Every answer carries a citation: the canonical query and its hash, the stored query and parameters if any, the snapshot id, the engine and dialect, the caps and any truncation, a hash of the result and a `limits` block taken from the manifest. `verify --answer` re-runs a cited answer against its snapshot and compares.
+
+**The engine is replaceable and optional.** `snapshot`, `verify` and `diff` are pure Go and never import the query package (CI checks `go list -deps`). The DuckDB engine is `duckdb.go`, compiled unless the build says `-tags noduckdb`, which swaps in an engine that reports "built without the query engine". DuckDB needs cgo and links `libstdc++` at run time.
 
 ## MCP tools
 
