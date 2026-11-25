@@ -4,8 +4,11 @@
 name: Tests
 
 # Builds, vets and tests the module on every pull request and merge to main,
-# checks that go.mod is tidy, and runs the names check. cgo is on, as the
-# query engine will need it.
+# checks that go.mod is tidy, and runs the names check. Two builds of the
+# command are tested: the one with the DuckDB query engine, which needs cgo (a
+# C and C++ compiler, which the runners have) and the engine's prebuilt static
+# libraries for the platform, and the pure-Go build with `-tags noduckdb`,
+# which needs neither and is what `snapshot verify` and `diff` run from.
 on:
   push:
     branches: [main]
@@ -27,7 +30,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # linux/amd64, linux/arm64 and macOS on Apple silicon: the engine ships
+        # prebuilt libraries for all of them. Windows is not built in v0.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     env:
       CGO_ENABLED: "1"
     steps:
@@ -47,6 +52,51 @@ jobs:
         run: go vet ./...
       - name: Test
         run: go test -race ./...
+      - name: Check the libraries the binary links
+        if: runner.os == 'Linux'
+        run: |
+          go build -trimpath -ldflags='-s -w' -o "$RUNNER_TEMP/infra-ontology" ./cmd/infra-ontology
+          scripts/check-ldd.sh "$RUNNER_TEMP/infra-ontology"
+      - name: Check the snapshot code does not import the engine
+        run: |
+          if go list -deps ./internal/snapshot ./schemas | grep -E 'internal/query|duckdb'; then
+            echo "the snapshot code imports the query engine" >&2
+            exit 1
+          fi
+
+  noduckdb:
+    name: go build, vet and test without the engine (noduckdb)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: go build -tags noduckdb ./...
+      - name: Vet
+        run: go vet -tags noduckdb ./...
+      - name: Test
+        run: go test -tags noduckdb ./...
+      - name: Check nothing of the engine is linked
+        run: |
+          if go list -deps -tags noduckdb ./... | grep -iE 'duckdb|apache/arrow'; then
+            echo "the noduckdb build depends on the engine" >&2
+            exit 1
+          fi
+      - name: Build for every release platform with no C toolchain
+        run: |
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            echo "$target"
+            GOOS="${target%/*}" GOARCH="${target#*/}" go build -tags noduckdb -o /dev/null ./cmd/infra-ontology
+          done
 
   names:
     name: names check

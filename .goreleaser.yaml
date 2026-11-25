@@ -6,9 +6,10 @@
 # workflow, and no tag is cut until the owner says. Run `goreleaser release
 # --snapshot --clean --skip=sbom,sign` to try it locally.
 #
-# The query engine will need cgo, so the final build is split per native
-# runner (Linux and macOS on amd64 and arm64, no Windows in v0); this single
-# pure-Go build is the placeholder until it lands.
+# The query engine needs cgo, so the final build is split per native runner
+# (Linux and macOS on amd64 and arm64, no Windows in v0). Until that lands this
+# single pure-Go build, with the noduckdb tag (no query engine), is the
+# placeholder: without the tag a CGO_ENABLED=0 build fails.
 version: 2
 project_name: infra-ontology
 
@@ -20,6 +21,8 @@ builds:
       - CGO_ENABLED=0
     flags:
       - -trimpath
+    tags:
+      - noduckdb
     ldflags:
       - -s -w -X github.com/hibiscus-ctrl/infra-ontology/internal/version.Version=v{{ .Version }}
     goos: [linux, darwin]

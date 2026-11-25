@@ -8,12 +8,12 @@ It runs on your laptop or in your CI, with your own credentials. It holds no sec
 
 ## Status
 
-**Early: not yet usable on a real estate.** The snapshot format is written: the JSON Schemas, a pure-Go Parquet writer with stable bytes and a content-addressed manifest, `snapshot verify` and `diff`. The state and inventory readers, the query layer and the MCP server are planned and land in later changes, so for now a snapshot can only be built from a JSON file (`snapshot build --from-json`, a path for tests and development). Nothing here is stable, and the name and the module path may still change.
+**Early: not yet usable on a real estate.** The snapshot format is written: the JSON Schemas, a pure-Go Parquet writer with stable bytes and a content-addressed manifest, `snapshot verify` and `diff`. So is the query layer: read-only SQL over a snapshot with row caps and a cited answer (`query`, `verify --answer`). The state and inventory readers and the MCP server are planned and land in later changes, so for now a snapshot can only be built from a JSON file (`snapshot build --from-json`, a path for tests and development). Nothing here is stable, and the name and the module path may still change.
 
 ## What it will do
 
 - **Snapshot.** Read Terraform state and a live inventory into one typed snapshot: nodes, edges and sources, in open Parquet files with a content-addressed manifest. Anyone can query a snapshot with their own DuckDB.
-- **Cited, read-only SQL.** A restricted `SELECT` dialect with row caps. An answer is evidence, not a claim: it names its query, its snapshot and the age of its data.
+- **Cited, read-only SQL.** A restricted `SELECT` dialect with row caps ([docs/query.md](docs/query.md)). An answer is evidence, not a claim: it names its query, its snapshot, its caps and the age of its data, and `verify --answer` re-runs it.
 - **MCP tools.** A stdio server that gives coding agents the same answers: `inventory`, `blast_radius`, a read-only `query` and `snapshot_info`.
 
 See [docs/architecture.md](docs/architecture.md) for how the parts fit together.
@@ -27,7 +27,7 @@ See [docs/architecture.md](docs/architecture.md) for how the parts fit together.
 
 ## Build
 
-You need Go (the version in `go.mod`).
+You need Go (the version in `go.mod`) and, for the query engine, cgo: a C and C++ compiler (`gcc` and `g++`, or the Xcode command line tools). `go build -tags noduckdb` builds without the engine, in pure Go; `query` then says so. A build with DuckDB is about 77 MB and links `libstdc++` at run time, so on Linux it needs a glibc distribution with libstdc++ installed.
 
 ```sh
 make build        # builds ./infra-ontology
@@ -37,6 +37,8 @@ make test
 # a snapshot is a folder; these work offline
 ./infra-ontology snapshot verify <snapshot-folder>   # check a snapshot against its manifest, offline
 ./infra-ontology diff <a> <b>                       # what changed from snapshot a to snapshot b
+./infra-ontology query <snapshot-folder> --stored unmanaged   # cited, read-only SQL (needs the engine)
+./infra-ontology verify --answer answer.json        # re-run a cited answer against its snapshot
 ```
 
 ## Contributing

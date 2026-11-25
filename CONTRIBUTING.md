@@ -23,7 +23,7 @@ once, and it covers all your later pull requests.
 
 ## Setting up
 
-You need Git and Go (the version in `go.mod`). The query engine will need cgo, so keep a C compiler installed.
+You need Git and Go (the version in `go.mod`). The query engine (DuckDB) needs cgo, so keep a C and C++ compiler installed; `go test -tags noduckdb ./...` runs everything that does not need it.
 
 ```sh
 make fast         # formatting, vet, names, licences and workflows

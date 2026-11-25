@@ -2,20 +2,36 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hibiscus-ctrl.github.io/infra-ontology/schemas/answer-v1.schema.json",
   "title": "infra-ontology answer, v1",
-  "description": "The citation record that comes with every answer: the query, the snapshot it ran against, the engine, the size and hash of the result, and the limits of the data. An answer is evidence, not a claim: a reader can re-run the query against the snapshot and compare result_hash.",
+  "description": "The citation record that comes with every answer: the query, the snapshot it ran against, the caps it ran under, the engine, the size and hash of the result, and the limits of the data. An answer is evidence, not a claim: a reader can re-run the query against the snapshot and compare result_hash.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["query", "query_hash", "snapshot_id", "dialect", "engine", "row_count", "truncated", "result_hash", "limits"],
+  "required": ["query", "query_hash", "snapshot_id", "dialect", "engine", "caps", "row_count", "truncated", "result_hash", "limits"],
   "properties": {
-    "query": {"description": "The SQL that ran.", "type": "string", "minLength": 1},
-    "query_hash": {"description": "sha256: and the hex SHA-256 of the normalised query text and its parameters.", "type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
-    "stored_query": {"description": "The name of the stored query, if the query came from queries/.", "type": "string"},
+    "query": {"description": "The SQL that ran, in the canonical form the engine writes back from the checked parse tree.", "type": "string", "minLength": 1},
+    "query_hash": {"description": "sha256: and the hex SHA-256 of the canonical query text. For a stored query the parameters are part of the text.", "type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "stored_query": {"description": "The name of the stored query, if the query came from the queries folder.", "type": "string"},
+    "stored_query_version": {"description": "The version of the stored query.", "type": "integer", "minimum": 1},
+    "stored_query_hash": {"description": "sha256: and the hex SHA-256 of the stored query's file.", "type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "parameters": {"description": "The values the stored query was rendered with, defaults included.", "type": "object", "additionalProperties": {"type": "string"}},
     "snapshot_id": {"description": "The snapshot_id of the snapshot the query ran against.", "type": "string", "pattern": "^[0-9a-f]{64}$"},
     "dialect": {"description": "The SQL dialect, for example infra-ontology/sql/v1.", "type": "string"},
-    "engine": {"description": "The engine and its version, for example duckdb 1.2.0.", "type": "string"},
+    "engine": {"description": "The engine and its version, for example duckdb 2.0.1.", "type": "string"},
+    "caps": {
+      "description": "The caps the query ran under. The time limit is not part of the answer: it decides whether an answer exists, not what it says.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_rows", "max_columns", "max_bytes"],
+      "properties": {
+        "max_rows": {"description": "The most rows returned.", "type": "integer", "minimum": 1},
+        "max_columns": {"description": "The most columns a result may have.", "type": "integer", "minimum": 1},
+        "max_bytes": {"description": "The approximate most bytes of result, as JSON.", "type": "integer", "minimum": 1}
+      }
+    },
     "row_count": {"description": "The number of rows returned.", "type": "integer", "minimum": 0},
-    "truncated": {"description": "True if the row cap cut the result.", "type": "boolean"},
-    "result_hash": {"description": "sha256: and the hex SHA-256 of the result in a canonical form.", "type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "truncated": {"description": "True if a cap cut the result: more rows exist than were returned.", "type": "boolean"},
+    "truncated_by": {"description": "Which cap cut the result.", "enum": ["rows", "bytes"]},
+    "ordered": {"description": "True if the query orders its own result, so the result hash covers the rows in order. Otherwise the rows are sorted before hashing, and a truncated result is not reproducible.", "type": "boolean"},
+    "result_hash": {"description": "sha256: and the hex SHA-256 of the result in a canonical form: the column names, then each row as JSON, one to a line.", "type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "limits": {
       "description": "What the data behind the answer cannot tell you.",
       "type": "object",
@@ -24,7 +40,34 @@
       "properties": {
         "oldest_source": {"description": "When the oldest source was read.", "type": "string", "format": "date-time"},
         "failed_sources": {"description": "The number of sources that did not read in full.", "type": "integer", "minimum": 0},
-        "uncovered_types": {"description": "Types the snapshot could not read.", "type": "array", "items": {"type": "string"}}
+        "uncovered_types": {"description": "Types the snapshot could not read.", "type": "array", "items": {"type": "string"}},
+        "status": {"description": "The snapshot's status: ok, or partial if a source did not read in full.", "type": "string"},
+        "failed": {
+          "description": "The sources that did not read in full, and why.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source_id", "status", "reason"],
+            "properties": {
+              "source_id": {"type": "string"},
+              "status": {"type": "string"},
+              "reason": {"type": "string"}
+            }
+          }
+        },
+        "covered": {
+          "description": "What the snapshot reads. An estate outside it is in no answer.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["clouds", "accounts", "types_read"],
+          "properties": {
+            "clouds": {"type": "array", "items": {"type": "string"}},
+            "accounts": {"type": "array", "items": {"type": "string"}},
+            "types_read": {"description": "How many resource types the snapshot holds.", "type": "integer", "minimum": 0}
+          }
+        },
+        "note": {"description": "The snapshot's own statement of its limits.", "type": "string"}
       }
     }
   }

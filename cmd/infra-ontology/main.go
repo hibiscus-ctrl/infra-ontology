@@ -20,13 +20,19 @@ const (
 	exitOK           = 0
 	exitFailed       = 1
 	exitUsage        = 2
-	exitVerifyFailed = 4 // a snapshot did not verify
+	exitVerifyFailed = 4 // a snapshot or an answer did not verify
 )
 
 const usage = `usage: infra-ontology <command> [flags]
 
 commands:
   snapshot verify [--json] <dir>      check a snapshot folder against its manifest
+  query <dir> --sql TEXT              read-only SQL over a snapshot, with row caps and a
+  query <dir> --stored NAME [--param k=v ...]
+                                      citation of the snapshot, query and result
+                                      (--json, --answer-out FILE, --list)
+  verify --answer FILE [--snapshot <dir>]
+                                      re-run a cited answer against its snapshot
   diff [--json] <a> [<b>]             what changed from snapshot a to snapshot b
                                       (b defaults to a's parent: what changed in a)
   snapshot build --from-json FILE     build a snapshot from a JSON file (for tests
@@ -34,7 +40,7 @@ commands:
                                       come later)
   version                             print the version
 
-exit codes: 0 ok, 1 failed, 2 usage error, 4 a snapshot did not verify
+exit codes: 0 ok, 1 failed, 2 usage error, 4 a snapshot or an answer did not verify
 `
 
 func main() {
@@ -52,6 +58,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runSnapshot(args[1:], stdout, stderr)
 	case "diff":
 		return runDiff(args[1:], stdout, stderr)
+	case "query":
+		return runQuery(args[1:], stdout, stderr)
+	case "verify":
+		return runVerifyTop(args[1:], stdout, stderr)
 	case "help", "--help", "-h":
 		fmt.Fprint(stdout, usage)
 		return exitOK

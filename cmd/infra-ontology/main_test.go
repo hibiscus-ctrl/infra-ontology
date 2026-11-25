@@ -23,8 +23,8 @@ func TestRunPrintsTheVersion(t *testing.T) {
 
 func TestRunRejectsAnUnknownCommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"query"}, &stdout, &stderr); code != 2 {
-		t.Fatalf("run(query) = %d, want 2", code)
+	if code := run([]string{"frobnicate"}, &stdout, &stderr); code != 2 {
+		t.Fatalf("run(frobnicate) = %d, want 2", code)
 	}
 	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "unknown command") {
 		t.Errorf("stdout %q, stderr %q: want an error on stderr only", stdout.String(), stderr.String())
