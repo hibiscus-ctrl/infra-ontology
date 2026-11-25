@@ -1,0 +1,10 @@
+# The binary
+/infra-ontology
+/infra-ontology.exe
+# Snapshots the tool writes by default
+/.infra-ontology/
+# GoReleaser output
+dist/
+.DS_Store
+.idea
+.vscode

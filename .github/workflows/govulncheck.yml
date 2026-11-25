@@ -1,0 +1,40 @@
+# Copyright 2026 Gabriel Ignat
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: Vulnerability check
+
+# Checks the module and the standard library it builds with for known
+# vulnerabilities, on every pull request and merge to main and weekly: a
+# vulnerability published after a dependency last changed fails here, with no
+# pull request to show it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
