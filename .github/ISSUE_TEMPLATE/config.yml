@@ -1,0 +1,17 @@
+# Copyright 2026 Gabriel Ignat
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# The issue chooser: every issue uses one of the forms in this directory.
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/hibiscus-ctrl/infra-ontology/security/advisories/new
+    about: >-
+      Report vulnerabilities privately, never in a public issue
+      (see SECURITY.md). A secret or an attribute value in a snapshot, an
+      answer or a log counts.
+  - name: Documentation
+    url: https://github.com/hibiscus-ctrl/infra-ontology/tree/main/docs
+    about: >-
+      Quickstart, the snapshot format, the SQL dialect, the MCP server,
+      security and the permissions each state backend needs.

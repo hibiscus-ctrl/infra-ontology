@@ -50,6 +50,10 @@ make test
 ./infra-ontology serve-mcp <snapshot-folder> --audit-log audit.jsonl   # an MCP server on stdio (needs the engine)
 ```
 
+## Documentation
+
+[Quickstart](docs/quickstart.md), [snapshot format](docs/snapshot-format.md), [SQL dialect](docs/sql-dialect.md), [MCP server](docs/mcp.md), [security](docs/security.md) and [permissions](docs/permissions.md), with the pages on [state](docs/state.md), [inventory](docs/inventory.md), [signing](docs/signing.md), [export](docs/export.md) and [architecture](docs/architecture.md).
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Contributions need a signed [CLA](CLA.md). Report vulnerabilities privately, as [SECURITY.md](SECURITY.md) says.

@@ -9,7 +9,9 @@ Go CLI that turns Terraform state and a live cloud inventory into a read-only, c
 - `make test` runs `go test -race ./...`; narrow it with `make test PKG=./cmd/...`.
 - `make vet` runs `go vet`; `make lint` runs golangci-lint with `.golangci.json`; `make fmt` formats.
 - `make fast` runs the quick checks: gofmt, vet, `scripts/check-names.sh`, `reuse lint` and `actionlint`.
+- `make golden` rewrites the golden files (review the diff), `make schemas` checks the schemas against what the code writes, and `make spike` builds and tests the cgo engine on this machine.
 - Lint fails only on the lines a pull request adds.
+- [CLAUDE.md](CLAUDE.md) adds the notes for coding agents; it points back here.
 
 ## Red lines
 

@@ -1,0 +1,51 @@
+# Copyright 2026 Gabriel Ignat
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: Schemas
+
+# Every JSON Schema under schemas/ is registered, compiles and validates what
+# the code writes: the manifest, every node, edge and source row of the
+# fixtures, and the citation of an answer. The schemas are the published
+# contract, so a change to the writer that the schemas refuse, or a schema
+# that nothing validates against, fails here. There are no generated files
+# (OWL, SHACL, JSON-LD) yet; when there are, `make schemas` regenerates them
+# and this job fails on a difference, as the golden files job does.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "13 5 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  schemas:
+    name: schemas validate their fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Check the schemas
+        run: make schemas
+      - name: Check no generated file is out of date
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --short
+            echo "a schema check changed a tracked file" >&2
+            exit 1
+          fi

@@ -1,0 +1,35 @@
+# Copyright 2026 Gabriel Ignat
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: Feature request
+description: A new capability or a change to how infra-ontology works.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        infra-ontology is read-only and keeps no secret or attribute value:
+        a request that needs either won't be accepted (see AGENTS.md). A
+        change to the snapshot format or the SQL dialect should say what it
+        adds, since a major version only gets additions.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you are trying to do, and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: >-
+        What infra-ontology could do about it: a command, a flag, a stored
+        query, an MCP tool, a node or edge kind, or a state backend.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other ways around it you have tried or considered.
