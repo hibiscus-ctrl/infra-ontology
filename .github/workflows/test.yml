@@ -59,7 +59,7 @@ jobs:
           scripts/check-ldd.sh "$RUNNER_TEMP/infra-ontology"
       - name: Check the snapshot code does not import the engine
         run: |
-          if go list -deps ./internal/snapshot ./schemas | grep -E 'internal/query|duckdb'; then
+          if go list -deps ./internal/snapshot ./internal/export ./schemas | grep -E 'internal/query|duckdb'; then
             echo "the snapshot code imports the query engine" >&2
             exit 1
           fi

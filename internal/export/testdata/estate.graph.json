@@ -1,0 +1,135 @@
+{
+  "schema": "infraharvest/graph/v1",
+  "run_id": "26237729-1fd3-5e2e-b0b2-6c360000f81a",
+  "generated_at": "2026-11-25T10:15:00Z",
+  "tool": {
+    "name": "infra-ontology",
+    "version": "dev"
+  },
+  "cloud": "aws",
+  "nodes": [
+    {
+      "kind": "module",
+      "account": "111111111111",
+      "region": "eu-west-1",
+      "environment": "prod",
+      "root": "net/prod",
+      "module_address": "module.network",
+      "source": "other"
+    },
+    {
+      "kind": "module",
+      "account": "222222222222",
+      "region": "eu-west-1",
+      "environment": "staging",
+      "root": "net/staging",
+      "module_address": "module.network",
+      "source": "other"
+    },
+    {
+      "kind": "resource",
+      "type": "aws_s3_bucket",
+      "id": "acme-legacy-uploads",
+      "account": "111111111111",
+      "region": "eu-west-1",
+      "environment": "prod"
+    },
+    {
+      "kind": "resource",
+      "type": "aws_instance",
+      "id": "prod-i-0e3f",
+      "account": "111111111111",
+      "region": "eu-west-1",
+      "environment": "prod",
+      "address": "aws_instance.app",
+      "root": "net/prod"
+    },
+    {
+      "kind": "resource",
+      "type": "aws_s3_bucket",
+      "id": "acme-prod-logs",
+      "account": "111111111111",
+      "region": "eu-west-1",
+      "environment": "prod",
+      "address": "aws_s3_bucket.logs",
+      "root": "net/prod"
+    },
+    {
+      "kind": "resource",
+      "type": "aws_subnet",
+      "id": "prod-subnet-0c2d",
+      "account": "111111111111",
+      "region": "eu-west-1",
+      "environment": "prod",
+      "address": "module.network.aws_subnet.private",
+      "root": "net/prod",
+      "parent": 0
+    },
+    {
+      "kind": "resource",
+      "type": "aws_vpc",
+      "id": "prod-vpc-0a1b",
+      "account": "111111111111",
+      "region": "eu-west-1",
+      "environment": "prod",
+      "address": "module.network.aws_vpc.main",
+      "root": "net/prod",
+      "parent": 0
+    },
+    {
+      "kind": "resource",
+      "type": "aws_instance",
+      "id": "staging-i-0e3f",
+      "account": "222222222222",
+      "region": "eu-west-1",
+      "environment": "staging",
+      "address": "aws_instance.app",
+      "root": "net/staging"
+    },
+    {
+      "kind": "resource",
+      "type": "aws_subnet",
+      "id": "staging-subnet-0c2d",
+      "account": "222222222222",
+      "region": "eu-west-1",
+      "environment": "staging",
+      "address": "module.network.aws_subnet.private",
+      "root": "net/staging",
+      "parent": 1
+    },
+    {
+      "kind": "resource",
+      "type": "aws_vpc",
+      "id": "staging-vpc-0a1b",
+      "account": "222222222222",
+      "region": "eu-west-1",
+      "environment": "staging",
+      "address": "module.network.aws_vpc.main",
+      "root": "net/staging",
+      "parent": 1
+    }
+  ],
+  "edges": [
+    {
+      "from": 3,
+      "to": 5
+    },
+    {
+      "from": 5,
+      "to": 6
+    },
+    {
+      "from": 7,
+      "to": 8
+    },
+    {
+      "from": 8,
+      "to": 9
+    }
+  ],
+  "redaction": {
+    "ids_hashed": false,
+    "hash_alg": "hmac-sha256",
+    "addresses": "plain"
+  }
+}

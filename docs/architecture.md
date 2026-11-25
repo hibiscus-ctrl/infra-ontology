@@ -36,6 +36,8 @@ No attribute values are stored. Tags are the one value kept, after the secret de
 
 **Diff.** `infra-ontology diff <a> [<b>]` loads two snapshots (verifying them first) and joins their nodes on `node_id` and their edges on `(from_id, to_id, kind)`. It reports what was added, removed and changed going from `a` to `b`. A change names the fields that differ, never their values, and leaves out the source, which changes whenever a state is read again. With one folder it compares that snapshot with its parent, found beside it by `parent_id`. Both commands print text, or JSON with `--json`.
 
+**Export.** `infra-ontology export graph <dir>` verifies a snapshot and writes the part of it that graph/v1 can hold, for Terragram to draw. It lives in `internal/export`, which imports `internal/snapshot` and not the query engine. See [export.md](export.md).
+
 Until the readers of state and inventory land, `infra-ontology snapshot build --from-json FILE` writes a snapshot from a JSON file of rows. It is a path for tests and development, not for real estates.
 
 Parquet is an open format: anyone can query a snapshot with their own DuckDB.
