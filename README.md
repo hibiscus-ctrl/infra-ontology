@@ -8,13 +8,14 @@ It runs on your laptop or in your CI, with your own credentials. It holds no sec
 
 ## Status
 
-**Early: not yet usable on a real estate.** The snapshot format is written: the JSON Schemas, a pure-Go Parquet writer with stable bytes and a content-addressed manifest, `snapshot verify` and `diff`. So is the query layer: read-only SQL over a snapshot with row caps and a cited answer (`query`, `verify --answer`). The MCP server (`serve-mcp`, [docs/mcp.md](docs/mcp.md)) is written too. The state and inventory readers are planned and land in later changes, so for now a snapshot can only be built from a JSON file (`snapshot build --from-json`, a path for tests and development). Nothing here is stable, and the name and the module path may still change.
+**Early: not yet usable on a real estate.** The snapshot format is written: the JSON Schemas, a pure-Go Parquet writer with stable bytes and a content-addressed manifest, `snapshot verify` and `diff`. So is the query layer: read-only SQL over a snapshot with row caps and a cited answer (`query`, `verify --answer`). The MCP server (`serve-mcp`, [docs/mcp.md](docs/mcp.md)) is written too. So is a lossy export to infraharvest's `graph/v1`, which Terragram draws (`export graph`, [docs/export.md](docs/export.md)). The state and inventory readers are planned and land in later changes, so for now a snapshot can only be built from a JSON file (`snapshot build --from-json`, a path for tests and development). Nothing here is stable, and the name and the module path may still change.
 
 ## What it will do
 
 - **Snapshot.** Read Terraform state and a live inventory into one typed snapshot: nodes, edges and sources, in open Parquet files with a content-addressed manifest. Anyone can query a snapshot with their own DuckDB.
 - **Cited, read-only SQL.** A restricted `SELECT` dialect with row caps ([docs/query.md](docs/query.md)). An answer is evidence, not a claim: it names its query, its snapshot, its caps and the age of its data, and `verify --answer` re-runs it.
 - **MCP tools.** `infra-ontology serve-mcp <snapshot>` is a stdio server that gives coding agents the same answers: `inventory`, `blast_radius`, a read-only `query` and `snapshot_info`, with an audit log of every call ([docs/mcp.md](docs/mcp.md), [SKILL.md](SKILL.md)). Written; waiting on the readers.
+- **Export to a picture.** `infra-ontology export graph <snapshot>` writes the resources, module calls and references of a snapshot as an infraharvest `graph/v1` document that Terragram draws. It is lossy, redaction carries over, and the same snapshot gives the same bytes ([docs/export.md](docs/export.md)).
 
 See [docs/architecture.md](docs/architecture.md) for how the parts fit together.
 
@@ -37,6 +38,7 @@ make test
 # a snapshot is a folder; these work offline
 ./infra-ontology snapshot verify <snapshot-folder>   # check a snapshot against its manifest, offline
 ./infra-ontology diff <a> <b>                       # what changed from snapshot a to snapshot b
+./infra-ontology export graph <snapshot-folder> -o graph.json   # a graph/v1 document for Terragram (lossy)
 ./infra-ontology query <snapshot-folder> --stored unmanaged   # cited, read-only SQL (needs the engine)
 ./infra-ontology verify --answer answer.json        # re-run a cited answer against its snapshot
 ./infra-ontology serve-mcp <snapshot-folder> --audit-log audit.jsonl   # an MCP server on stdio (needs the engine)

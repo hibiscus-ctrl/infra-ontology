@@ -24,3 +24,12 @@ path = ["schemas/*.schema.json", "schemas/*.md"]
 precedence = "override"
 SPDX-FileCopyrightText = "Copyright 2026 Gabriel Ignat"
 SPDX-License-Identifier = "Apache-2.0"
+
+# The infraharvest graph/v1 JSON Schema the export tests validate against is
+# vendored unchanged (see internal/export/testdata/NOTICE) and is Apache-2.0
+# like the schemas it comes from.
+[[annotations]]
+path = "internal/export/testdata/graph-v1.schema.json"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright 2026 Gabriel Ignat"
+SPDX-License-Identifier = "Apache-2.0"

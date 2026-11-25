@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Command infra-ontology builds a read-only, cited snapshot of a cloud estate
-// and its Terraform state. So far it can verify a snapshot, compare two and
-// (as a test and development path) build one from a JSON file; reading state
-// and inventory comes later.
+// and its Terraform state. So far it can verify a snapshot, compare two, answer
+// read-only SQL over one, write one as a graph/v1 document and (as a test and
+// development path) build one from a JSON file; reading state and inventory
+// comes later.
 package main
 
 import (
@@ -38,6 +39,9 @@ commands:
   serve-mcp <dir> [--tools LIST] [--audit-log FILE]
                                       an MCP server on stdio over a verified snapshot:
                                       inventory, blast_radius, query, snapshot_info
+  export graph [-o FILE] [--cloud NAME] <dir>
+                                      write a snapshot as an infraharvest graph/v1 document
+                                      (lossy) that Terragram can draw
   snapshot build --from-json FILE     build a snapshot from a JSON file (for tests
                                       and development; state and inventory readers
                                       come later)
@@ -65,6 +69,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runQuery(args[1:], stdout, stderr)
 	case "verify":
 		return runVerifyTop(args[1:], stdout, stderr)
+	case "export":
+		return runExport(args[1:], stdout, stderr)
 	case "serve-mcp":
 		return runServeMCP(args[1:], stdout, stderr)
 	case "help", "--help", "-h":
