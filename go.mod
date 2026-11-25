@@ -11,7 +11,7 @@ require (
 	github.com/parquet-go/parquet-go v0.32.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/sigstore/protobuf-specs v0.5.2
-	github.com/sigstore/sigstore v1.11.1
+	github.com/sigstore/sigstore v1.11.3
 	github.com/sigstore/sigstore-go v1.4.0
 	google.golang.org/protobuf v1.36.12
 )
