@@ -44,9 +44,7 @@ func checkTree(js string) (ordered bool, err error) {
 	if node == nil {
 		return false, reject("the statement is not a query")
 	}
-	ctes := map[string]bool{}
-	collectCTEs(stmt, ctes)
-	if err := walk(stmt, ctes); err != nil {
+	if err := newWalker().walk(stmt); err != nil {
 		return false, err
 	}
 	return hasOrder(node), nil
@@ -87,11 +85,23 @@ var okClasses = set(
 // Scalar and aggregate functions. A function not here is refused, including
 // every function that reads a file, the environment or the settings, and
 // every higher-order list function. Each addition is reviewed.
-var okFuncs = set(
-	// aggregates
+var okFuncs = set(slices.Concat(aggregateFuncs, windowFuncs, scalarFuncs)...)
+
+// What a window expression may be: a ranking or offset function, or an
+// aggregate. Nothing else is a window, whatever its name is elsewhere.
+var okWindowFuncs = set(slices.Concat(aggregateFuncs, windowFuncs)...)
+
+var aggregateFuncs = []string{
 	"count", "count_star", "sum", "min", "max", "avg", "any_value", "first", "last", "arbitrary",
 	"list", "array_agg", "string_agg", "group_concat", "bool_and", "bool_or", "median", "mode",
 	"approx_count_distinct",
+}
+
+var windowFuncs = []string{
+	"row_number", "rank", "dense_rank", "lag", "lead", "first_value", "last_value", "ntile", "percent_rank",
+}
+
+var scalarFuncs = []string{
 	// null handling and comparison
 	"coalesce", "ifnull", "nullif", "least", "greatest", "if", "typeof",
 	// text
@@ -103,11 +113,9 @@ var okFuncs = set(
 	// lists
 	"list_contains", "list_has", "list_append", "list_concat", "list_distinct", "list_sort", "list_value",
 	"list_extract", "array_length", "cardinality", "unnest", "list_has_any", "list_has_all", "array_extract",
-	// windows and ranking
-	"row_number", "rank", "dense_rank", "lag", "lead", "first_value", "last_value", "ntile", "percent_rank",
 	// tags are a list of key and value structs
 	"struct_extract", "struct_pack", "row",
-)
+}
 
 // Operators the parser writes as functions with is_operator set.
 var okOperators = set(
@@ -131,56 +139,35 @@ func set(names ...string) map[string]bool {
 	return m
 }
 
-func collectCTEs(v any, out map[string]bool) {
-	switch t := v.(type) {
-	case map[string]any:
-		if cm, ok := t["cte_map"].(map[string]any); ok {
-			entries, _ := cm["map"].([]any)
-			for _, e := range entries {
-				if em, ok := e.(map[string]any); ok {
-					if k := str(em["key"]); k != "" {
-						out[strings.ToLower(k)] = true
-					}
-				}
-			}
-		}
-		for _, c := range t {
-			collectCTEs(c, out)
-		}
-	case []any:
-		for _, c := range t {
-			collectCTEs(c, out)
+// walker walks a parse tree. Nothing in the tree is trusted by default: every
+// member of every map is walked, so a field a later DuckDB adds cannot hide an
+// expression. The members it does not walk are the plain strings, numbers and
+// booleans, which cannot hold one.
+type walker struct {
+	// scope counts the CTE names visible at the node being walked: the names
+	// of the WITH clauses on the path from the root to it, and no others.
+	scope map[string]int
+}
+
+func newWalker() *walker { return &walker{scope: map[string]int{}} }
+
+func (w *walker) push(name string) { w.scope[name]++ }
+
+func (w *walker) pop(names []string) {
+	for _, n := range names {
+		if w.scope[n]--; w.scope[n] <= 0 {
+			delete(w.scope, n)
 		}
 	}
 }
 
-func walk(v any, ctes map[string]bool) error {
+func (w *walker) walk(v any) error {
 	switch t := v.(type) {
 	case map[string]any:
-		// A sample picks rows at random: the same query would not give the
-		// same answer twice.
-		if sample, ok := t["sample"]; ok && sample != nil {
-			return reject("sampling is not allowed: an answer must be the same each time")
-		}
-		if err := checkNode(t, ctes); err != nil {
-			return err
-		}
-		for k, c := range t {
-			// The function of a table function was checked with its table.
-			if k == "function" && str(t["type"]) == "TABLE_FUNCTION" {
-				fn, _ := c.(map[string]any)
-				if err := walk(fn["children"], ctes); err != nil {
-					return err
-				}
-				continue
-			}
-			if err := walk(c, ctes); err != nil {
-				return err
-			}
-		}
+		return w.walkMap(t)
 	case []any:
 		for _, c := range t {
-			if err := walk(c, ctes); err != nil {
+			if err := w.walk(c); err != nil {
 				return err
 			}
 		}
@@ -188,24 +175,149 @@ func walk(v any, ctes map[string]bool) error {
 	return nil
 }
 
+func (w *walker) walkMap(t map[string]any) error {
+	// A sample picks rows at random: the same query would not give the same
+	// answer twice.
+	if sample, ok := t["sample"]; ok && sample != nil {
+		return reject("sampling is not allowed: an answer must be the same each time")
+	}
+	if err := w.checkNode(t); err != nil {
+		return err
+	}
+	// A WITH clause names tables for its own node and what is below it, and
+	// for nothing else: the names go in on the way down and out on the way up.
+	cm, hasCTEs := t["cte_map"]
+	if hasCTEs && cm != nil {
+		pushed, err := w.walkCTEMap(cm)
+		defer w.pop(pushed)
+		if err != nil {
+			return err
+		}
+	}
+	for k, c := range t {
+		if k == "cte_map" {
+			continue
+		}
+		if k == "function" && str(t["type"]) == "TABLE_FUNCTION" {
+			if err := w.walkTableFunction(c); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := w.walk(c); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// walkCTEMap walks the definitions of a WITH clause and returns the names it
+// brought into scope, which the caller takes out again. A definition sees the
+// names before it, and its own only if it is recursive; the rest of the node
+// sees all of them.
+func (w *walker) walkCTEMap(cm any) (pushed []string, err error) {
+	m, ok := cm.(map[string]any)
+	if !ok {
+		return nil, reject("a WITH clause is not readable")
+	}
+	var entries []any
+	if raw, present := m["map"]; present && raw != nil {
+		if entries, ok = raw.([]any); !ok {
+			return nil, reject("a WITH clause is not readable")
+		}
+	}
+	for _, e := range entries {
+		em, ok := e.(map[string]any)
+		name := strings.ToLower(str(em["key"]))
+		if !ok || name == "" {
+			return pushed, reject("a WITH clause has an entry with no name")
+		}
+		recursive := false
+		if val, ok := em["value"].(map[string]any); ok {
+			if qn, ok := val["query_node"].(map[string]any); ok {
+				recursive = str(qn["type"]) == "RECURSIVE_CTE_NODE"
+			}
+		}
+		if recursive {
+			w.push(name)
+			pushed = append(pushed, name)
+		}
+		if err := w.walk(em["value"]); err != nil {
+			return pushed, err
+		}
+		if !recursive {
+			w.push(name)
+			pushed = append(pushed, name)
+		}
+	}
+	for k, c := range m {
+		if k != "map" {
+			if err := w.walk(c); err != nil {
+				return pushed, err
+			}
+		}
+	}
+	return pushed, nil
+}
+
+// walkTableFunction walks the function of a table function. Its name, schema
+// and catalog were checked with the table; everything else it holds, its
+// arguments above all, is walked like any other expression.
+func (w *walker) walkTableFunction(v any) error {
+	fn, _ := v.(map[string]any)
+	for k, c := range fn {
+		switch k {
+		case "function_name", "schema", "catalog", "qualified_name":
+			continue
+		}
+		if err := w.walk(c); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // checkNode checks one map of the tree: an expression if it has a class, a
-// query node or table reference if it has only a type.
-func checkNode(t map[string]any, ctes map[string]bool) error {
+// query node or table reference if it has only a type. A map that is neither
+// may hold no name of a function or a table, so a name cannot escape the
+// checks by leaving out the class or the type that triggers them.
+func (w *walker) checkNode(t map[string]any) error {
+	ty, hasType := t["type"].(string)
 	if class, isExpr := t["class"].(string); isExpr {
 		if !okClasses[class] {
 			return reject("expression class %s is not allowed", class)
 		}
-		if class == "FUNCTION" {
+		if okTypes[ty] && ty != "SUBQUERY" {
+			return reject("node type %s is not an expression", ty)
+		}
+		if _, ok := t["table_name"]; ok {
+			return reject("a table name in an expression is not allowed")
+		}
+		switch class {
+		case "FUNCTION":
 			return checkFunction(t)
+		case "WINDOW":
+			return checkWindow(t)
+		}
+		if _, ok := t["function_name"]; ok {
+			return reject("a function name in a %s expression is not allowed", class)
 		}
 		return nil
 	}
-	ty, ok := t["type"].(string)
-	if !ok {
+	if _, ok := t["function_name"]; ok {
+		return reject("a function name outside a function call is not allowed")
+	}
+	if !hasType {
+		if _, ok := t["table_name"]; ok {
+			return reject("a table name outside a table reference is not allowed")
+		}
 		return nil
 	}
 	if !okTypes[ty] {
 		return reject("node type %s is not allowed", ty)
+	}
+	if _, ok := t["table_name"]; ok && ty != "BASE_TABLE" {
+		return reject("a table name in a %s is not allowed", ty)
 	}
 	switch ty {
 	case "BASE_TABLE":
@@ -213,14 +325,23 @@ func checkNode(t map[string]any, ctes map[string]bool) error {
 		if str(t["catalog_name"]) != "" || str(t["schema_name"]) != "" {
 			return reject("qualified table %s.%s.%s is not allowed", str(t["catalog_name"]), str(t["schema_name"]), name)
 		}
-		if !slices.Contains(tableNames, name) && !ctes[name] {
+		if err := checkPath(t, name, "table"); err != nil {
+			return err
+		}
+		if !slices.Contains(tableNames, name) && w.scope[name] == 0 {
 			return reject("table %q is not allowed: a query may read %s", name, strings.Join(tableNames, ", "))
 		}
 	case "TABLE_FUNCTION":
 		fn, _ := t["function"].(map[string]any)
 		name := strings.ToLower(str(fn["function_name"]))
+		if fn["class"] != "FUNCTION" {
+			return reject("a table function without a function call is not allowed")
+		}
 		if str(fn["catalog"]) != "" || str(fn["schema"]) != "" {
 			return reject("qualified table function %s.%s.%s is not allowed", str(fn["catalog"]), str(fn["schema"]), name)
+		}
+		if err := checkPath(fn, name, "table function"); err != nil {
+			return err
 		}
 		if !okTableFuncs[name] {
 			return reject("table function %s() is not allowed: a query may call %s", name, strings.Join(TableFunctionNames(), ", "))
@@ -234,6 +355,9 @@ func checkFunction(t map[string]any) error {
 	if str(t["catalog"]) != "" || str(t["schema"]) != "" {
 		return reject("qualified function %s.%s.%s is not allowed", str(t["catalog"]), str(t["schema"]), name)
 	}
+	if err := checkPath(t, name, "function"); err != nil {
+		return err
+	}
 	if op, _ := t["is_operator"].(bool); op {
 		if !okOperators[name] {
 			return reject("operator %s is not allowed", name)
@@ -242,6 +366,38 @@ func checkFunction(t map[string]any) error {
 	}
 	if !okFuncs[name] {
 		return reject("function %s() is not allowed", name)
+	}
+	return nil
+}
+
+// checkWindow holds a window expression to the rules of a function call, with
+// the narrower list of what may be used as a window: ranking and offset
+// functions, and the aggregates.
+func checkWindow(t map[string]any) error {
+	name := strings.ToLower(str(t["function_name"]))
+	if str(t["catalog"]) != "" || str(t["schema"]) != "" {
+		return reject("qualified window function %s.%s.%s is not allowed", str(t["catalog"]), str(t["schema"]), name)
+	}
+	if err := checkPath(t, name, "window function"); err != nil {
+		return err
+	}
+	if !okWindowFuncs[name] {
+		return reject("window function %s() is not allowed", name)
+	}
+	return nil
+}
+
+// checkPath refuses a name whose qualified form, when the tree has one, says
+// anything but the plain name that was checked.
+func checkPath(t map[string]any, name, what string) error {
+	qn, present := t["qualified_name"]
+	if !present || qn == nil {
+		return nil
+	}
+	m, _ := qn.(map[string]any)
+	path, _ := m["path"].([]any)
+	if len(path) != 1 || strings.ToLower(str(path[0])) != name {
+		return reject("the qualified name of the %s %s is not allowed", what, name)
 	}
 	return nil
 }

@@ -6,6 +6,7 @@ package query
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -76,6 +77,102 @@ func TestCheckerOnHandWrittenTrees(t *testing.T) {
 	}
 }
 
+// Trees for what the walker must hold whatever DuckDB writes next: a member it
+// has never seen is walked like any other, a name outside a call is refused,
+// and a WITH clause is in scope for its own node and no further.
+func TestWalkerIsDefaultDeny(t *testing.T) {
+	const bad = `{"class":"FUNCTION","type":"FUNCTION","function_name":"getenv","schema":"","catalog":"","is_operator":false,"children":[]}`
+	const fn = `{"class":"FUNCTION","type":"FUNCTION","function_name":"%s","schema":"","catalog":"","is_operator":false,"arguments":[%s]}`
+	tf := func(name, extra string) string {
+		return `{"type":"TABLE_FUNCTION","function":{"class":"FUNCTION","type":"FUNCTION","function_name":"` + name + `","schema":"","catalog":"","is_operator":false,` + extra + `}}`
+	}
+	sel := func(from, body string) string {
+		return `{"error":false,"statements":[{"node":{"type":"SELECT_NODE","modifiers":[],"cte_map":{"map":[]},"select_list":[` + body + `],"from_table":` + from + `}}]}`
+	}
+	const empty = `{"type":"EMPTY"}`
+	const one = `{"class":"CONSTANT","type":"VALUE_CONSTANT"}`
+	base := func(name string) string {
+		return `{"type":"BASE_TABLE","schema_name":"","catalog_name":"","table_name":"` + name + `"}`
+	}
+	win := func(name, members string) string {
+		return `{"class":"WINDOW","type":"WINDOW_AGGREGATE","function_name":"` + name + `","schema":"","catalog":""` + members + `}`
+	}
+	cte := func(name, query string) string {
+		return `{"key":"` + name + `","value":{"query_node":` + query + `}}`
+	}
+	sub := func(cteEntries, from string) string {
+		return `{"type":"SELECT_NODE","modifiers":[],"cte_map":{"map":[` + cteEntries + `]},"select_list":[],"from_table":` + from + `}`
+	}
+	cases := []struct {
+		name, tree string
+		ok         bool
+	}{
+		{"table function arguments", sel(tf("blast", `"arguments":[{"name":"","expression":`+one+`}]`), one), true},
+		{"a bad function in table function arguments", sel(tf("blast", `"arguments":[{"name":"","expression":`+bad+`}]`), one), false},
+		{"a bad function in a member DuckDB has not named yet", sel(tf("blast", `"brand_new_member":[{"x":`+bad+`}]`), one), false},
+		{"a bad function in a table function filter", sel(tf("blast", `"filter":`+bad), one), false},
+		{"a bad function in a table function's order", sel(tf("blast", `"order_bys":{"type":"ORDER_MODIFIER","orders":[{"type":"ORDER_DEFAULT","expression":`+bad+`}]}`), one), false},
+		{"a subquery in table function arguments", sel(tf("blast", `"arguments":[{"expression":{"class":"SUBQUERY","type":"SUBQUERY","subquery":{"node":`+sub("", base("duckdb_settings"))+`}}}]`), one), false},
+		{"a table function with no function call", sel(`{"type":"TABLE_FUNCTION","function":{"function_name":"blast"}}`, one), false},
+		{"a table function with a qualified path", sel(tf("blast", `"qualified_name":{"path":["memory","main","blast"]}`), one), false},
+		{"a table function with a plain path", sel(tf("blast", `"qualified_name":{"path":["blast"]}`), one), true},
+		{"a function name outside a call", sel(empty, `{"function_name":"read_csv"}`), false},
+		{"a function name in a constant", sel(empty, `{"class":"CONSTANT","type":"VALUE_CONSTANT","function_name":"read_csv"}`), false},
+		{"a table name outside a table", sel(empty, `{"table_name":"duckdb_settings"}`), false},
+		{"a table name in an expression", sel(empty, `{"class":"COLUMN_REF","type":"COLUMN_REF","table_name":"x"}`), false},
+		{"a table name in a join", sel(`{"type":"JOIN","table_name":"nodes"}`, one), false},
+		{"a table reference posing as an expression", sel(empty, `{"class":"CONSTANT","type":"BASE_TABLE","table_name":"nodes"}`), false},
+		{"a base table with a path of another name", sel(`{"type":"BASE_TABLE","schema_name":"","catalog_name":"","table_name":"nodes","qualified_name":{"path":["main","duckdb_settings"]}}`, one), false},
+		{"a listed window function", sel(empty, win("row_number", `,"partitions":[`+one+`],"orders":[]`)), true},
+		{"an aggregate as a window", sel(empty, win("sum", `,"arguments":[`+one+`]`)), true},
+		{"a scalar as a window", sel(empty, win("lower", ``)), false},
+		{"an unlisted window function", sel(empty, win("getenv", ``)), false},
+		{"a qualified window function", sel(empty, `{"class":"WINDOW","type":"WINDOW_ROW_NUMBER","function_name":"row_number","schema":"main","catalog":""}`), false},
+		{"a window function in a catalogue", sel(empty, `{"class":"WINDOW","type":"WINDOW_ROW_NUMBER","function_name":"row_number","schema":"","catalog":"memory"}`), false},
+		{"a window whose path names another function", sel(empty, win("row_number", `,"qualified_name":{"path":["read_csv"]}`)), false},
+		{"a bad function in a window partition", sel(empty, win("sum", `,"partitions":[`+bad+`]`)), false},
+		{"a bad function in a window order", sel(empty, win("sum", `,"orders":[{"type":"ORDER_DEFAULT","expression":`+bad+`}]`)), false},
+		{"a bad function in a window filter", sel(empty, win("sum", `,"filter_expr":`+bad)), false},
+		{"a bad function in a window frame", sel(empty, win("sum", `,"start_expr":`+bad)), false},
+		{"a bad function in a window frame end", sel(empty, win("sum", `,"end_expr":`+bad)), false},
+		{"a bad function in a window offset", sel(empty, win("lag", `,"offset_expr":`+bad)), false},
+		{"a bad function in a window default", sel(empty, win("lag", `,"default_expr":`+bad)), false},
+		{"a bad function in a window argument", sel(empty, win("sum", `,"arguments":[`+bad+`]`)), false},
+		{"a star with a bad replacement", sel(empty, `{"class":"STAR","type":"STAR","replace_list":[{"key":"name","value":`+bad+`}]}`), false},
+		{"a star with a bad columns expression", sel(empty, `{"class":"STAR","type":"STAR","columns":true,"expr":`+bad+`}`), false},
+		{"a case with a bad else", sel(empty, `{"class":"CASE","type":"CASE_EXPR","case_checks":[],"else_expr":`+bad+`}`), false},
+		{"a cast of a bad function", sel(empty, `{"class":"CAST","type":"CAST","child":`+bad+`}`), false},
+		{"a bad function under a listed one", sel(empty, fmt.Sprintf(fn, "lower", bad)), false},
+		{"a collate", sel(empty, `{"class":"COLLATE","type":"COLLATE","child":`+one+`}`), false},
+		{"a lambda", sel(empty, `{"class":"LAMBDA","type":"LAMBDA","lhs":`+one+`,"expr":`+one+`}`), false},
+		{"a sample on a table", sel(`{"type":"BASE_TABLE","schema_name":"","catalog_name":"","table_name":"nodes","sample":{"method":"RESERVOIR"}}`, one), false},
+		{"a sample on a table function", sel(`{"type":"TABLE_FUNCTION","sample":{"method":"RESERVOIR"},"function":{"class":"FUNCTION","function_name":"blast","schema":"","catalog":""}}`, one), false},
+
+		{"a CTE read in its own node", sel(`{"type":"SUBQUERY","subquery":{"node":`+sub(cte("t", sub("", empty)), base("t"))+`}}`, one), true},
+		{"a CTE read after its node", sel(`{"type":"JOIN","left":{"type":"SUBQUERY","subquery":{"node":`+sub(cte("t", sub("", empty)), base("t"))+`}},"right":`+base("t")+`}`, one), false},
+		{"a CTE read before its node", sel(`{"type":"JOIN","left":`+base("t")+`,"right":{"type":"SUBQUERY","subquery":{"node":`+sub(cte("t", sub("", empty)), base("t"))+`}}}`, one), false},
+		{"a CTE read by its own definition", sel(`{"type":"SUBQUERY","subquery":{"node":`+sub(cte("t", sub("", base("t"))), empty)+`}}`, one), false},
+		{"a CTE read by a later definition", sel(`{"type":"SUBQUERY","subquery":{"node":`+sub(cte("a", sub("", empty))+","+cte("b", sub("", base("a"))), empty)+`}}`, one), true},
+		{"a CTE read by an earlier definition", sel(`{"type":"SUBQUERY","subquery":{"node":`+sub(cte("a", sub("", base("b")))+","+cte("b", sub("", empty)), empty)+`}}`, one), false},
+		{"a recursive CTE read by itself", sel(`{"type":"SUBQUERY","subquery":{"node":`+sub(cte("r", `{"type":"RECURSIVE_CTE_NODE","left":`+sub("", empty)+`,"right":`+sub("", base("r"))+`}`), empty)+`}}`, one), true},
+		{"a CTE in scope in a nested node", sel(`{"type":"SUBQUERY","subquery":{"node":`+sub(cte("t", sub("", empty)), `{"type":"SUBQUERY","subquery":{"node":`+sub("", base("t"))+`}}`)+`}}`, one), true},
+		{"a CTE of the same name popped twice", sel(`{"type":"JOIN","left":{"type":"SUBQUERY","subquery":{"node":`+sub(cte("t", sub("", empty)), `{"type":"SUBQUERY","subquery":{"node":`+sub(cte("t", sub("", empty)), empty)+`}}`)+`}},"right":`+base("t")+`}`, one), false},
+		{"a CTE with no name", sel(`{"type":"SUBQUERY","subquery":{"node":`+sub(`{"key":"","value":{}}`, empty)+`}}`, one), false},
+		{"a CTE map that is not a map", sel(`{"type":"SUBQUERY","subquery":{"node":{"type":"SELECT_NODE","cte_map":"t","select_list":[],"from_table":`+empty+`}}}`, one), false},
+		{"a CTE map with an unreadable list", sel(`{"type":"SUBQUERY","subquery":{"node":{"type":"SELECT_NODE","cte_map":{"map":"t"},"select_list":[],"from_table":`+empty+`}}}`, one), false},
+		{"a bad function in a CTE definition", sel(`{"type":"SUBQUERY","subquery":{"node":`+sub(cte("t", `{"type":"SELECT_NODE","modifiers":[],"select_list":[`+bad+`],"from_table":`+empty+`}`), empty)+`}}`, one), false},
+	}
+	for _, c := range cases {
+		err := CheckSerialized(c.tree)
+		if c.ok && err != nil {
+			t.Errorf("%s: refused: %v", c.name, err)
+		}
+		if !c.ok && !errors.Is(err, ErrRejected) {
+			t.Errorf("%s: want a refusal, got %v", c.name, err)
+		}
+	}
+}
+
 // A CTE name is a table only for the statement that declares it.
 func TestCTENamesAreNotGlobal(t *testing.T) {
 	withCTE := `{"error":false,"statements":[{"node":{"type":"SELECT_NODE","modifiers":[],"select_list":[],"cte_map":{"map":[{"key":"mine","value":{}}]},"from_table":{"type":"BASE_TABLE","schema_name":"","catalog_name":"","table_name":"mine"}}}]}`
@@ -104,6 +201,32 @@ func TestOrderedIsRead(t *testing.T) {
 		got, err := checkTree(js)
 		if err != nil || got != want {
 			t.Errorf("%q: ordered = %t, %v; want %t", sql, got, err, want)
+		}
+	}
+}
+
+// collectCTEs collects every CTE name in a tree, wherever it is declared: the
+// loosest view of what a table name may be, which the fuzz target holds the
+// scoped walker inside.
+func collectCTEs(v any, out map[string]bool) {
+	switch t := v.(type) {
+	case map[string]any:
+		if cm, ok := t["cte_map"].(map[string]any); ok {
+			entries, _ := cm["map"].([]any)
+			for _, e := range entries {
+				if em, ok := e.(map[string]any); ok {
+					if k := str(em["key"]); k != "" {
+						out[strings.ToLower(k)] = true
+					}
+				}
+			}
+		}
+		for _, c := range t {
+			collectCTEs(c, out)
+		}
+	case []any:
+		for _, c := range t {
+			collectCTEs(c, out)
 		}
 	}
 }

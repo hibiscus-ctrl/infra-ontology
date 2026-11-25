@@ -179,3 +179,104 @@
 - selec 1
 - SELECT FROM WHERE
 - SELECT * FROM nodes WHERE
+
+# --- table function arguments, windows, CTE scope and the rest of the tree ---
++ SELECT * FROM blast((SELECT 1), 1)
++ SELECT * FROM blast(lower('a'), 1 + 1)
++ SELECT * FROM blast('abc', max_depth := 3)
++ SELECT name, sum(1) OVER (PARTITION BY account ORDER BY name ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) FROM nodes
++ SELECT name, count(*) FILTER (WHERE kind = 'resource') OVER (PARTITION BY account) FROM nodes
++ SELECT name, lead(name, 1, 'none') OVER w FROM nodes WINDOW w AS (ORDER BY name)
++ SELECT * REPLACE (lower(name) AS name) FROM nodes
++ SELECT * FROM nodes WHERE kind = 'a' QUALIFY row_number() OVER (PARTITION BY account ORDER BY name) = 1
++ WITH nodes AS (SELECT * FROM nodes) SELECT * FROM nodes
++ WITH a AS (SELECT 1 AS x), b AS (SELECT x FROM a) SELECT * FROM b
++ SELECT * FROM (WITH t AS (SELECT 1) SELECT * FROM t) AS s
++ SELECT * FROM nodes WHERE node_id IN (WITH t AS (SELECT from_id FROM edges) SELECT * FROM t)
+- SELECT * FROM blast((SELECT 1 FROM duckdb_settings()), 1)
+- SELECT * FROM blast((SELECT column0 FROM read_csv('/etc/passwd')), 1)
+- SELECT * FROM blast(getenv('HOME'), 1)
+- SELECT * FROM blast('abc', getenv('HOME'))
+- SELECT * FROM blast('abc', (SELECT count(*) FROM glob('/etc/*')))
+- SELECT * FROM blast('abc', max_depth := getenv('HOME'))
+- SELECT * FROM blast('abc', CASE WHEN true THEN getenv('HOME') ELSE 'x' END)
+- SELECT * FROM blast(blast_arg((SELECT 1 FROM duckdb_settings())), 1)
+- SELECT * FROM blast((SELECT 1 FROM blast((SELECT 1 FROM duckdb_settings()), 1)), 1)
+- SELECT * FROM cone((SELECT node_id FROM nodes WHERE name = getenv('HOME')), 2)
+- SELECT * FROM nodes, unnest((SELECT list(1) FROM duckdb_settings())) AS u(x)
+- SELECT unnest((SELECT list(name) FROM duckdb_tables()))
+- SELECT * FROM blast('abc', 3) WHERE node_id IN (SELECT 1 FROM duckdb_settings())
+- SELECT read_csv('/etc/passwd') OVER ()
+- SELECT main.row_number() OVER () FROM nodes
+- SELECT memory.main.row_number() OVER () FROM nodes
+- SELECT getenv('HOME') OVER () FROM nodes
+- SELECT current_setting('threads') OVER (PARTITION BY name) FROM nodes
+- SELECT repeat('a', 1000000000) OVER () FROM nodes
+- SELECT lower(name) OVER () FROM nodes
+- SELECT unnest(tags) OVER () FROM nodes
+- SELECT sum(1) OVER (PARTITION BY getenv('HOME')) FROM nodes
+- SELECT sum(1) OVER (ORDER BY (SELECT 1 FROM duckdb_settings())) FROM nodes
+- SELECT sum(1) FILTER (WHERE getenv('HOME') = 'x') OVER () FROM nodes
+- SELECT sum(1) OVER (ORDER BY name ROWS BETWEEN getenv('N')::INTEGER PRECEDING AND CURRENT ROW) FROM nodes
+- SELECT lag(name, getenv('N')::INTEGER) OVER (ORDER BY name) FROM nodes
+- SELECT lag(name, 1, getenv('HOME')) OVER (ORDER BY name) FROM nodes
+- SELECT name, row_number() OVER w FROM nodes WINDOW w AS (PARTITION BY getenv('HOME'))
+- SELECT * FROM (WITH duckdb_settings AS (SELECT 1) SELECT 1), duckdb_settings
+- SELECT * FROM (WITH duckdb_tables AS (SELECT 1) SELECT 1), duckdb_tables
+- SELECT * FROM (WITH sqlite_master AS (SELECT 1) SELECT 1) AS a JOIN sqlite_master ON true
+- SELECT (WITH sqlite_master AS (SELECT 1) SELECT 1), (SELECT * FROM sqlite_master)
+- SELECT * FROM nodes WHERE node_id IN (WITH t AS (SELECT 1) SELECT * FROM t) AND node_id IN (SELECT * FROM t)
+- SELECT * FROM (WITH t AS (SELECT 1) SELECT * FROM t) AS a, (SELECT * FROM t) AS b
+- WITH a AS (SELECT 1) SELECT * FROM a UNION SELECT * FROM (WITH b AS (SELECT 1) SELECT * FROM b) AS s, b
+- WITH sqlite_master AS (SELECT * FROM sqlite_master) SELECT * FROM sqlite_master
+- WITH duckdb_tables AS (SELECT * FROM duckdb_tables) SELECT 1
+- WITH a AS (SELECT * FROM b), b AS (SELECT 1) SELECT * FROM a
+- WITH a AS (SELECT * FROM a) SELECT 1
+- WITH x AS (SELECT 1) SELECT * FROM x WHERE EXISTS (SELECT 1 FROM y)
+- SELECT * REPLACE (getenv('HOME') AS name) FROM nodes
+- SELECT * REPLACE ((SELECT 1 FROM duckdb_settings()) AS name) FROM nodes
+- SELECT * EXCLUDE (name) REPLACE (read_text('/etc/passwd') AS kind) FROM nodes
+- SELECT COLUMNS(getenv('HOME')) FROM nodes
+- SELECT COLUMNS(c -> getenv('HOME') = c) FROM nodes
+- SELECT n.* REPLACE (getenv('HOME') AS name) FROM nodes n
+- SELECT * RENAME (name AS other) FROM nodes WHERE getenv('HOME') = 'x'
+- SELECT CASE WHEN getenv('HOME') = 'x' THEN 1 END FROM nodes
+- SELECT CASE name WHEN 'a' THEN getenv('HOME') END FROM nodes
+- SELECT CASE WHEN true THEN 1 ELSE (SELECT 1 FROM duckdb_settings()) END FROM nodes
+- SELECT CAST(getenv('HOME') AS VARCHAR) FROM nodes
+- SELECT TRY_CAST((SELECT 1 FROM duckdb_settings()) AS VARCHAR) FROM nodes
+- SELECT name COLLATE nocase FROM nodes WHERE getenv('HOME') COLLATE nocase = 'x'
+- SELECT name FROM nodes ORDER BY getenv('HOME')
+- SELECT name FROM nodes ORDER BY name COLLATE nocase, (SELECT 1 FROM duckdb_settings())
+- SELECT name FROM nodes LIMIT (SELECT count(*) FROM duckdb_settings())
+- SELECT name FROM nodes LIMIT 1 OFFSET (SELECT count(*) FROM duckdb_settings())
+- SELECT name FROM nodes GROUP BY getenv('HOME')
+- SELECT name FROM nodes GROUP BY ROLLUP (getenv('HOME'))
+- SELECT name FROM nodes GROUP BY name HAVING getenv('HOME') = 'x'
+- SELECT name FROM nodes WHERE name BETWEEN getenv('A') AND 'z'
+- SELECT name FROM nodes WHERE name IN (getenv('A'), 'z')
+- SELECT name FROM nodes WHERE name = ANY (SELECT 1 FROM duckdb_settings())
+- SELECT name FROM nodes WHERE name IS DISTINCT FROM getenv('HOME')
+- SELECT name FROM nodes n JOIN edges e ON getenv('HOME') = n.name
+- SELECT name FROM nodes n JOIN edges e USING (node_id) WHERE (SELECT 1 FROM duckdb_settings()) = 1
++ SELECT name FROM nodes n ASOF JOIN edges e ON n.node_id >= e.from_id
+- SELECT * FROM nodes PIVOT (count(*) FOR kind IN ('a'))
+- SELECT * FROM nodes UNPIVOT (v FOR k IN (name, kind))
++ SELECT * FROM nodes POSITIONAL JOIN edges
+- SELECT * FROM (VALUES (getenv('HOME'))) AS v(x)
+- SELECT * FROM (VALUES ((SELECT 1 FROM duckdb_settings()))) AS v(x)
+- SELECT * FROM nodes AT (VERSION => getenv('HOME'))
+- SELECT [getenv('HOME')]
+- SELECT {'a': getenv('HOME')}
+- SELECT name[getenv('N')::INTEGER] FROM nodes
+- SELECT struct_extract(tags[1], getenv('HOME')) FROM nodes
+- SELECT ROW(getenv('HOME'))
+- SELECT * FROM nodes WHERE regexp_matches(name, getenv('HOME'))
+- SELECT * FROM nodes WHERE name SIMILAR TO getenv('HOME')
+- SELECT * FROM nodes WHERE name LIKE getenv('HOME') ESCAPE 'x'
+- SELECT getenv('HOME') UNION ALL SELECT 'x'
+- SELECT 'x' UNION ALL (SELECT getenv('HOME') ORDER BY 1)
+- SELECT sum(name ORDER BY getenv('HOME')) FROM nodes
+- SELECT array_agg(DISTINCT getenv('HOME')) FROM nodes
+- SELECT string_agg(name, getenv('HOME')) FROM nodes
+- SELECT count(*) FILTER (WHERE getenv('HOME') = 'x') FROM nodes
