@@ -75,6 +75,12 @@ type Options struct {
 	// either way.
 	DropTags    []string
 	DropAllTags bool
+	// HashKey, if not nil, hashes the snapshot: native IDs, ARNs and paths,
+	// names, Terraform addresses and state locations become HMAC-SHA256
+	// hashes under it (see pkg/secretscan), so that they join the same
+	// values in an infraharvest export made with the same key. It is never
+	// written.
+	HashKey []byte
 }
 
 // Result is the rows of the states, and what they cannot tell you.
@@ -105,8 +111,11 @@ func BuildAll(reads []Read, invs []InventoryRead, o Options) (Result, error) {
 		tm: tm, o: o,
 		nodes: map[string]snapshot.Node{}, edges: map[edgeKey]snapshot.Edge{},
 		producers: map[string][]*docState{}, externals: map[string]bool{},
-		tagFilter: secretscan.NewTagFilter(o.DropTags, o.DropAllTags, nil),
-		invSource: map[string]string{}, joined: map[string]bool{},
+		tagFilter:       secretscan.NewTagFilter(o.DropTags, o.DropAllTags, o.HashKey),
+		hashedTagFilter: secretscan.NewTagFilter(o.DropTags, o.DropAllTags, nil),
+		invSource:       map[string]string{}, joined: map[string]bool{},
+		key: o.HashKey, raw: map[string]rawID{}, preHashed: map[string]bool{},
+		mismatched: map[string]bool{},
 	}
 	var docs []tfstate.Document
 	for _, r := range reads {
@@ -139,7 +148,7 @@ func BuildAll(reads []Read, invs []InventoryRead, o Options) (Result, error) {
 		}
 	}
 	return Result{
-		Tables: b.tables(), Limits: b.limits(), Redaction: b.redaction(),
+		Tables: b.redactTables(b.tables()), Limits: b.limits(), Redaction: b.redaction(),
 		Failed: len(b.failed) + len(b.failedInventories) + b.partialInventories,
 	}, nil
 }
@@ -179,7 +188,10 @@ type builder struct {
 	duplicates, noID, unresolved, unplaced int
 
 	// The inventories read, and what was made of them.
-	tagFilter          *secretscan.TagFilter
+	tagFilter *secretscan.TagFilter
+	// hashedTagFilter filters the tags of an inventory that hashed its own
+	// IDs: they are not hashed again.
+	hashedTagFilter    *secretscan.TagFilter
 	inventories        []Inventory
 	failedInventories  []InventoryRead
 	partialInventories int
@@ -192,13 +204,24 @@ type builder struct {
 	stateManaged []string
 
 	credentialIDs, tagsDropped, claimedManaged int
+
+	// key hashes the snapshot, if not nil (see Options.HashKey). raw holds the
+	// ID and ARN a state gave each resource node, as written, to be matched to
+	// the hashes of an inventory. preHashed marks the fields of a node that
+	// came from an inventory that hashed them already (see hashField).
+	// mismatched holds the hashed inventories that matched nothing in the
+	// states although they list resources of the same types and accounts.
+	key        []byte
+	raw        map[string]rawID
+	preHashed  map[string]bool
+	mismatched map[string]bool
 }
 
 func (b *builder) fail(r Read) {
 	b.failed = append(b.failed, r)
 	loc := Sanitise(r.Location)
 	b.sources = append(b.sources, snapshot.Source{
-		SourceID: sourceID(loc), Kind: snapshot.SourceState, Backend: BackendOf(r.Location),
+		SourceID: b.sourceID(loc), Kind: snapshot.SourceState, Backend: BackendOf(r.Location),
 		Location: loc, CollectedAt: b.at(), Collector: b.o.Collector, CollectorVersion: b.o.CollectorVersion,
 		Status: snapshot.StatusFailed, Reason: Scrub(r.Err.Error()),
 	})
@@ -262,7 +285,7 @@ func rank(c string) int {
 func (b *builder) addDocument(d tfstate.Document) *docState {
 	loc := Sanitise(d.Source)
 	s := &docState{
-		doc: d, loc: loc, source: sourceID(loc),
+		doc: d, loc: loc, source: b.sourceID(loc),
 		byAddress: map[string][]string{}, byKeyless: map[string][]string{}, calls: map[string][]string{},
 	}
 	src := snapshot.Source{
@@ -277,7 +300,7 @@ func (b *builder) addDocument(d tfstate.Document) *docState {
 	}
 	b.sources = append(b.sources, src)
 
-	s.root = snapshot.NodeID(snapshot.KindStateRoot, "", "", "", "", loc)
+	s.root = b.nodeID(snapshot.KindStateRoot, "", "", "", "", loc)
 	b.addNode(snapshot.Node{
 		NodeID: s.root, Kind: snapshot.KindStateRoot, NativeID: loc, Name: rootName(loc), Root: loc,
 		ManagedStatus: snapshot.Managed, Confidence: snapshot.Observed, SourceID: s.source,
@@ -296,7 +319,7 @@ func (b *builder) addDocument(d tfstate.Document) *docState {
 		}
 		s.members = append(s.members, m)
 		for _, call := range calls {
-			id := snapshot.NodeID(snapshot.KindModuleCall, "", "", "", "", loc+"|"+call)
+			id := b.nodeID(snapshot.KindModuleCall, "", "", "", "", loc+"|"+call)
 			if _, ok := b.nodes[id]; !ok {
 				b.nodes[id] = snapshot.Node{
 					NodeID: id, Kind: snapshot.KindModuleCall, NativeID: loc + "|" + call, Name: callName(call),
@@ -356,8 +379,12 @@ func (b *builder) instanceNode(s *docState, in tfstate.Instance) snapshot.Node {
 	} else if key == "" {
 		key = "tf:" + s.loc + "|" + in.Address
 	}
+	nodeID := b.nodeID(snapshot.KindResource, cloud, sc.account, sc.region, tfType, key)
+	if b.key != nil {
+		b.raw[nodeID] = rawID{id: id, arn: arn}
+	}
 	return snapshot.Node{
-		NodeID: snapshot.NodeID(snapshot.KindResource, cloud, sc.account, sc.region, tfType, key),
+		NodeID: nodeID,
 		Kind:   snapshot.KindResource, Cloud: cloud, Account: sc.account, Region: sc.region,
 		TFType: tfType, NativeID: sc.id, ARNOrPath: sc.path, Name: in.Name,
 		Address: in.Address, Module: in.Module, Root: s.loc,
@@ -421,7 +448,7 @@ func (b *builder) addEdges(s *docState) {
 }
 
 func (b *builder) callID(s *docState, call string) string {
-	return snapshot.NodeID(snapshot.KindModuleCall, "", "", "", "", s.loc+"|"+call)
+	return b.nodeID(snapshot.KindModuleCall, "", "", "", "", s.loc+"|"+call)
 }
 
 // dependencies adds an edge from an instance to each instance, data source or
@@ -475,7 +502,7 @@ func (b *builder) remoteStates(s *docState) {
 		} else {
 			b.externals[loc] = true
 		}
-		id := snapshot.NodeID(snapshot.KindExternal, "", "", "", "", native)
+		id := b.nodeID(snapshot.KindExternal, "", "", "", "", native)
 		b.addNode(snapshot.Node{
 			NodeID: id, Kind: snapshot.KindExternal, NativeID: native, Name: loc,
 			ManagedStatus: snapshot.Unknown, Confidence: snapshot.Inferred, SourceID: s.source,
@@ -500,6 +527,9 @@ func (b *builder) tables() snapshot.Tables {
 func (b *builder) limits() string {
 	var s []string
 	s = append(s, b.readFrom()...)
+	if b.key != nil {
+		s = append(s, "IDs, names, Terraform addresses and state locations are HMAC-SHA256 hashes under a key this snapshot does not hold; types, accounts, regions and counts are readable.")
+	}
 	if len(b.externals) > 0 {
 		var locs []string
 		for l := range b.externals {
@@ -510,8 +540,14 @@ func (b *builder) limits() string {
 		if len(locs) > 10 {
 			more, locs = fmt.Sprintf(" and %d more", len(locs)-10), locs[:10]
 		}
-		s = append(s, fmt.Sprintf("%d states read by terraform_remote_state are not in this snapshot, so anything that depends on them stops at an external placeholder: %s%s.",
-			len(b.externals), strings.Join(locs, ", "), more))
+		switch {
+		case b.key != nil:
+			// The locations are what --hash-ids hides: they are not listed.
+			s = append(s, fmt.Sprintf("%d states read by terraform_remote_state are not in this snapshot, so anything that depends on them stops at an external placeholder.", len(b.externals)))
+		default:
+			s = append(s, fmt.Sprintf("%d states read by terraform_remote_state are not in this snapshot, so anything that depends on them stops at an external placeholder: %s%s.",
+				len(b.externals), strings.Join(locs, ", "), more))
+		}
 	}
 	if b.unplaced > 0 {
 		s = append(s, strconv.Itoa(b.unplaced)+" terraform_remote_state data sources use a backend whose settings name no state this reader can place, so they point to a placeholder.")

@@ -50,6 +50,8 @@ commands:
                                       hcp://organization/workspace; --inventory adds what is live,
                                       from an infraharvest inventory/v1 or ocsf-inventory/v1 export
                                       (--drop-tag KEY, --drop-tags: tags to leave out)
+                                      (--hash-ids [--hash-key-file FILE]: hash IDs, names, addresses and
+                                      locations with HMAC-SHA256; the key is INFRA_ONTOLOGY_KEY or the file)
   snapshot build --from-json FILE     build a snapshot from a JSON file (for tests and development)
   version                             print the version
 

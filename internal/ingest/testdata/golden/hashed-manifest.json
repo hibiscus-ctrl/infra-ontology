@@ -1,0 +1,95 @@
+{
+  "format": "infra-ontology/snapshot/v1",
+  "format_minor": 0,
+  "snapshot_id": "0b770d6a8ffcca3a7260575ee14b2999ee8b4f61319c6b68aa65972de906f517",
+  "parent_id": "",
+  "label": "fixture",
+  "created_at": "2026-11-25T12:00:00Z",
+  "tool": {
+    "name": "infra-ontology",
+    "version": "test"
+  },
+  "status": "ok",
+  "tables": [
+    {
+      "name": "edges",
+      "file": "edges.parquet",
+      "sha256": "12f29a170d577bd7f2f8a1187c5c12166468ec24c5cb5ee890dec8dda10e7736",
+      "rows": 64,
+      "schema": "infra-ontology/edge/v1"
+    },
+    {
+      "name": "nodes",
+      "file": "nodes.parquet",
+      "sha256": "b2517d2230ce3e7eca7c0054884a294dbc63fc679449bf994f42a5591bdf8eed",
+      "rows": 47,
+      "schema": "infra-ontology/node/v1"
+    },
+    {
+      "name": "sources",
+      "file": "sources.parquet",
+      "sha256": "2885b422e7f2c57c435d6b2786859814dfbbb0bda924d932b799c0b7d41dd838",
+      "rows": 8,
+      "schema": "infra-ontology/source/v1"
+    }
+  ],
+  "sources_summary": {
+    "count": 8,
+    "by_kind": {
+      "inventory": 3,
+      "state": 5
+    },
+    "oldest_collected_at": "2026-11-25T09:30:00Z",
+    "newest_collected_at": "2026-11-25T12:00:00Z"
+  },
+  "redaction": {
+    "hash_algorithm": "hmac-sha256",
+    "ids_hashed": true,
+    "addresses_dropped": false,
+    "tag_keys_dropped": [
+      "db_password"
+    ],
+    "all_tags_dropped": false
+  },
+  "coverage": {
+    "clouds": [
+      "aws",
+      "azure",
+      "gcp"
+    ],
+    "accounts": [
+      "111111111111",
+      "222222222222",
+      "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb",
+      "acme-prod"
+    ],
+    "types": [
+      "aws_caller_identity",
+      "aws_db_instance",
+      "aws_ecs_cluster",
+      "aws_iam_role",
+      "aws_instance",
+      "aws_lb",
+      "aws_s3_bucket",
+      "aws_s3_bucket_versioning",
+      "aws_sqs_queue",
+      "aws_subnet",
+      "aws_vpc",
+      "aws_vpc_endpoint",
+      "azurerm_resource_group",
+      "azurerm_storage_account",
+      "azurerm_subnet",
+      "azurerm_virtual_network",
+      "google_compute_instance",
+      "google_compute_subnetwork",
+      "google_dns_managed_zone",
+      "google_storage_bucket",
+      "random_password",
+      "random_string",
+      "terraform_data",
+      "terraform_remote_state"
+    ],
+    "failed_sources": []
+  },
+  "limits": "Read from Terraform state and infraharvest inventories: a resource in both is managed, and one only in an inventory has the status its inventory gives it (unmanaged, unless the inventory knows who manages it). Attribute values and output values are never read: the only values kept from a resource are its id, ARN and, from an inventory, its tags, less the tags that look like secrets. IDs, names, Terraform addresses and state locations are HMAC-SHA256 hashes under a key this snapshot does not hold; types, accounts, regions and counts are readable. 2 states read by terraform_remote_state are not in this snapshot, so anything that depends on them stops at an external placeholder. 1 terraform_remote_state data sources use a backend whose settings name no state this reader can place, so they point to a placeholder. 1 dependencies name an address the state does not hold and are left out. 1 tags look like secrets, or were dropped by request, and are not kept. 2 resources in the states read are not in the inventories, though these list their type and account: they may have been deleted, or not be listed. They stay managed."
+}

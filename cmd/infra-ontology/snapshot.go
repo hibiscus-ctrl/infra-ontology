@@ -19,6 +19,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/IgnatG/infraharvest/pkg/secretscan"
+
 	"github.com/hibiscus-ctrl/infra-ontology/internal/ingest"
 	"github.com/hibiscus-ctrl/infra-ontology/internal/snapshot"
 	"github.com/hibiscus-ctrl/infra-ontology/internal/version"
@@ -253,6 +255,8 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 	fs.Var(&inventories, "inventory", "an infraharvest export to read: an inventory/v1 or ocsf-inventory/v1 JSON file (repeat for more)")
 	fs.Var(&dropTags, "drop-tag", "a tag key to drop from the inventories' resources (repeat it, or separate keys with commas)")
 	dropAllTags := fs.Bool("drop-tags", false, "drop every tag of the inventories' resources")
+	hashIDs := fs.Bool("hash-ids", false, "hash IDs, ARNs, names, Terraform addresses and state locations with HMAC-SHA256, under a key from "+keyEnv+" (or "+secretscan.KeyEnv+") or --hash-key-file")
+	hashKeyFile := fs.String("hash-key-file", "", "the file that holds the key --hash-ids hashes with (16 bytes at least)")
 	from := fs.String("from-json", "", "the JSON file of nodes, edges and sources to build from (test and development path)")
 	out := fs.String("out", filepath.Join(".infra-ontology", "snapshots"), "the folder to write the snapshot folder into")
 	label := fs.String("label", "", "a name for the snapshot (overrides the file's)")
@@ -267,6 +271,12 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	case *from == "" && len(states) == 0 && len(inventories) == 0:
 		fmt.Fprintln(stderr, "infra-ontology snapshot build: --state LOCATION or --inventory FILE is required (or --from-json FILE, for tests)")
+		return exitUsage
+	case *hashKeyFile != "" && !*hashIDs:
+		fmt.Fprintln(stderr, "infra-ontology snapshot build: --hash-key-file is for --hash-ids")
+		return exitUsage
+	case *hashIDs && *from != "":
+		fmt.Fprintln(stderr, "infra-ontology snapshot build: --hash-ids hashes what --state and --inventory read, not --from-json")
 		return exitUsage
 	}
 	var (
@@ -307,6 +317,14 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 		in := ingest.Options{
 			CollectedAt: opts.CreatedAt, Collector: "infra-ontology", CollectorVersion: version.Version,
 			DropTags: splitKeys(dropTags), DropAllTags: *dropAllTags,
+		}
+		if *hashIDs {
+			key, err := readHashKey(*hashKeyFile)
+			if err != nil {
+				fmt.Fprintf(stderr, "infra-ontology snapshot build: %v\n", err)
+				return exitUsage
+			}
+			in.HashKey = key
 		}
 		if res, code = readSources(states, inventories, in, stderr); code != exitOK && code != exitPartial {
 			return code
@@ -400,3 +418,25 @@ func splitKeys(values []string) []string {
 
 // cleanErr removes credentials from an error before it is printed.
 func cleanErr(err error) string { return ingest.Scrub(err.Error()) }
+
+// keyEnv is the environment variable that holds the key --hash-ids hashes
+// with, if --hash-key-file does not name a file. INFRAHARVEST_EXPORT_KEY,
+// which infraharvest export reads, is read too, so that one key can serve both.
+const keyEnv = "INFRA_ONTOLOGY_KEY"
+
+// readHashKey returns the key --hash-ids hashes with: the content of file, or
+// else the environment variable keyEnv, or else the one infraharvest export
+// reads. It is the key of pkg/secretscan, so that the hashes are the ones
+// infraharvest export --hash-ids writes for the same key.
+func readHashKey(file string) ([]byte, error) {
+	getenv := func(name string) string {
+		if name == secretscan.KeyEnv {
+			return first(os.Getenv(keyEnv), os.Getenv(name))
+		}
+		return os.Getenv(name)
+	}
+	if file == "" && getenv(secretscan.KeyEnv) == "" {
+		return nil, fmt.Errorf("--hash-ids needs a key you hold: set %s (or %s), or name a file with --hash-key-file", keyEnv, secretscan.KeyEnv)
+	}
+	return secretscan.ReadKey(file, getenv)
+}

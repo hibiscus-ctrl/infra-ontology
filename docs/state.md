@@ -58,6 +58,33 @@ A `terraform_remote_state` is matched to a source by the backend's own naming: b
 
 A resource found in more than one state is one node, listed under the first state read (states are read in order of location), with a `defined_in` edge to each. A data source is identified by the state it is read in, since many states read the same thing.
 
+## Hashing IDs
+
+`--hash-ids` hashes what a snapshot says about where things are and what they are called, so that a snapshot can leave the machine that read the state:
+
+```sh
+export INFRA_ONTOLOGY_KEY=$(openssl rand -hex 32)      # or --hash-key-file FILE
+infra-ontology snapshot build --state s3://acme-tfstate/prod/ --hash-ids
+```
+
+The key stays with you. It comes from the file `--hash-key-file` names or, without one, from `INFRA_ONTOLOGY_KEY` (`INFRAHARVEST_EXPORT_KEY`, which `infraharvest export` reads, is the fallback, so one key serves both tools). It must be 16 bytes or more. `--hash-ids` without a key is a usage error (2), and so is `--hash-key-file` without `--hash-ids` and `--hash-ids` with `--from-json`. The key is never written: not to the snapshot, not to the manifest (which records the algorithm, `hmac-sha256`, and no fingerprint of the key), not to standard output or error.
+
+What is hashed, as the HMAC-SHA256 in hexadecimal that `infraharvest export --hash-ids` writes for the same key (`pkg/secretscan`):
+
+| Hashed | Where |
+| --- | --- |
+| `native_id`, `arn_or_path`, `name` | `nodes`. A resource's ID is hashed as the state wrote it, so it is the hash an infraharvest export made with the same key has for the same ID |
+| `address`, `module`, `root` | `nodes`: Terraform addresses, module paths and the location of the state a node is in |
+| `location`, `workspace` | `sources`: where a state or an inventory file was read from, and the workspace its location names |
+| `document_sha256` | `sources`: it hashes what was read, so it is keyed too |
+| `node_id`, `source_id` | the HMAC of the node's kind, cloud, account, region, type and hashed native ID, and an identifier made from the hashed location. `edge_id` is the SHA-256 of an edge's kind and its two (hashed) ends |
+
+Types, accounts, regions, kinds, statuses, counts and times stay readable, as in infraharvest. So do a state's serial, Terraform version and lineage, which is a random UUID. The tags an inventory brings go through infraharvest's tag filter with the key, so a `Name` tag, or a tag whose value is or holds an ID or a name, is hashed too, and a tag whose key names the resource is dropped. A `terraform_remote_state` read from a state that is not in the snapshot is an `external` node with a hashed name, and `limits` does not list its location. The reason a source could not be read is replaced by a fixed text, since an error message holds paths and names; the source's status and hashed location remain.
+
+The same key gives the same hashes, so the same estate gives the same `snapshot_id`, `verify` and `diff` work as they do on any snapshot, and two snapshots hashed with one key can be compared. Two keys give two snapshots with no node in common. A hashed snapshot says so in the manifest (`redaction.hash_algorithm` is `hmac-sha256` and `redaction.ids_hashed` is true) and in `limits`. `--drop-addresses` is not built yet.
+
+A test builds a hashed snapshot from the fixtures and fails if the key, in any form, or any value it hides is in any file the command writes.
+
 ## What it cannot tell you
 
 The manifest's `limits` says, in plain text: that no live inventory was read, so nothing is marked unmanaged (with [`--inventory`](inventory.md), what it says instead); which states `terraform_remote_state` reads that are not in the snapshot; how many dependencies name an address the state does not hold; how many resources more than one state holds; and how many ids were left out. A resource whose ARN or ID does not carry an account or a region has none.
