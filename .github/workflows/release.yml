@@ -1,0 +1,95 @@
+# Copyright 2026 Gabriel Ignat
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: Release
+
+# Runs when a version tag (v*) is pushed. It builds the archives natively on
+# each platform (build-release.yml), signs the checksums file with cosign
+# (keyless, through GitHub's OIDC token), attests the archives' build
+# provenance, and creates a DRAFT GitHub release holding them. It never
+# publishes: the owner reviews the draft and publishes it. It never creates a
+# tag either.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build
+    uses: ./.github/workflows/build-release.yml
+    with:
+      version: ${{ github.ref_name }}
+
+  sign:
+    name: sign and attest
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write # the OIDC token cosign and the attestation sign with
+      attestations: write
+    steps:
+      - name: Download the archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+      - name: Install cosign
+        uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
+      - name: Sign the checksums
+        run: |
+          sums=$(ls dist/*_SHA256SUMS)
+          cosign sign-blob --yes --bundle "$sums.sigstore.json" "$sums"
+      - name: Attest the build provenance of the archives
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/infra-ontology_${{ needs.build.outputs.version }}_SHA256SUMS
+      - name: Upload the signed release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: dist
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: draft release
+    needs: sign
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # creates the draft release; nothing else in this workflow can
+    steps:
+      - name: Download the signed release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: dist
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          flags=()
+          if [[ "$TAG" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          cat >notes.md <<NOTES
+          Draft release $TAG.
+
+          Which archive to download, the libstdc++ the Linux ones need, and how to verify the signatures and the provenance: docs/install.md in this repository, at this tag.
+          NOTES
+          gh release create "$TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft --verify-tag \
+            --title "$TAG" \
+            --notes-file notes.md \
+            "${flags[@]}"

@@ -3,7 +3,7 @@
 /infra-ontology.exe
 # Snapshots the tool writes by default
 /.infra-ontology/
-# GoReleaser output
+# Release archives (scripts/package-release.sh)
 dist/
 .DS_Store
 .idea
