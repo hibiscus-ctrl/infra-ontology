@@ -192,23 +192,58 @@ type FailedSource struct {
 }
 
 // Answer is the citation record that comes with every answer
-// (schemas/answer-v1.schema.json). The query layer fills it in a later change.
+// (schemas/answer-v1.schema.json): the query that ran, the snapshot it ran
+// against, the caps it ran under, what came back, and what the data cannot
+// tell you. An answer is evidence: `verify --answer` re-runs the query
+// against the snapshot and compares the result hash.
 type Answer struct {
-	Query       string       `json:"query"`
-	QueryHash   string       `json:"query_hash"`
-	StoredQuery string       `json:"stored_query,omitempty"`
-	SnapshotID  string       `json:"snapshot_id"`
-	Dialect     string       `json:"dialect"`
-	Engine      string       `json:"engine"`
-	RowCount    int          `json:"row_count"`
-	Truncated   bool         `json:"truncated"`
-	ResultHash  string       `json:"result_hash"`
-	Limits      AnswerLimits `json:"limits"`
+	// Query is the canonical SQL: the text the engine wrote back from the
+	// checked parse tree, which is what ran.
+	Query     string `json:"query"`
+	QueryHash string `json:"query_hash"`
+	// StoredQuery names the stored query, its version and the hash of its
+	// file, and Parameters the values it was rendered with, when the query
+	// came from the queries folder.
+	StoredQuery        string            `json:"stored_query,omitempty"`
+	StoredQueryVersion int               `json:"stored_query_version,omitempty"`
+	StoredQueryHash    string            `json:"stored_query_hash,omitempty"`
+	Parameters         map[string]string `json:"parameters,omitempty"`
+	SnapshotID         string            `json:"snapshot_id"`
+	Dialect            string            `json:"dialect"`
+	Engine             string            `json:"engine"`
+	Caps               AnswerCaps        `json:"caps"`
+	RowCount           int               `json:"row_count"`
+	Truncated          bool              `json:"truncated"`
+	TruncatedBy        string            `json:"truncated_by,omitempty"`
+	// Ordered says the query orders its own result, so the result hash
+	// covers the rows in order; otherwise the rows are sorted before hashing.
+	Ordered    bool         `json:"ordered"`
+	ResultHash string       `json:"result_hash"`
+	Limits     AnswerLimits `json:"limits"`
+}
+
+// AnswerCaps are the caps the query ran under.
+type AnswerCaps struct {
+	MaxRows    int   `json:"max_rows"`
+	MaxColumns int   `json:"max_columns"`
+	MaxBytes   int64 `json:"max_bytes"`
 }
 
 // AnswerLimits says what the data behind an answer cannot tell you.
 type AnswerLimits struct {
-	OldestSource   string   `json:"oldest_source,omitempty"`
-	FailedSources  int      `json:"failed_sources"`
-	UncoveredTypes []string `json:"uncovered_types,omitempty"`
+	OldestSource   string         `json:"oldest_source,omitempty"`
+	FailedSources  int            `json:"failed_sources"`
+	UncoveredTypes []string       `json:"uncovered_types,omitempty"`
+	Status         string         `json:"status,omitempty"`
+	Failed         []FailedSource `json:"failed,omitempty"`
+	Covered        *AnswerCovered `json:"covered,omitempty"`
+	Note           string         `json:"note,omitempty"`
+}
+
+// AnswerCovered is what the snapshot reads: an estate outside it is not in
+// any answer.
+type AnswerCovered struct {
+	Clouds    []string `json:"clouds"`
+	Accounts  []string `json:"accounts"`
+	TypesRead int      `json:"types_read"`
 }

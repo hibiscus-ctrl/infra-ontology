@@ -1,0 +1,181 @@
+# The query corpus. One statement to a line; blank lines and lines that start
+# with # are skipped. "+" must be allowed, "-" must be refused. The refused
+# ones go through the checker; the engine-level attacks they stand for are in
+# duckdb_test.go. Recorded parse trees are in serialized.json: refresh them
+# with go test ./internal/query -update after adding a line.
+
+# --- allowed: the shapes real questions take ---
++ SELECT 1
++ SELECT count(*) FROM nodes
++ SELECT * FROM nodes
++ SELECT * FROM nodes;
++ SELECT * FROM nodes /* a comment; SELECT 2 */
++ SELECT node_id, name FROM nodes WHERE managed_status = 'unmanaged' ORDER BY name DESC
++ SELECT kind, count(*) AS n FROM nodes GROUP BY kind HAVING count(*) > 1 ORDER BY n DESC, kind
++ SELECT DISTINCT cloud, account FROM nodes
++ SELECT n.name, e.kind FROM edges e JOIN nodes n ON n.node_id = e.from_id
++ SELECT n.name FROM nodes n LEFT JOIN edges e ON e.to_id = n.node_id WHERE e.edge_id IS NULL
++ SELECT n.name FROM nodes n WHERE NOT EXISTS (SELECT 1 FROM edges e WHERE e.to_id = n.node_id)
++ SELECT name FROM nodes WHERE node_id IN (SELECT from_id FROM edges)
++ SELECT name FROM nodes WHERE name LIKE 'web%' OR name ILIKE '%DB%'
++ SELECT name FROM nodes WHERE address NOT LIKE 'module.%'
++ SELECT name FROM nodes WHERE regexp_matches(name, '^web')
++ SELECT lower(name) || '-' || upper(account) FROM nodes
++ SELECT coalesce(nullif(tf_type, ''), inventory_type) AS type FROM nodes
++ SELECT CASE WHEN managed_status = 'managed' THEN 1 ELSE 0 END AS managed FROM nodes
++ SELECT CAST(count(*) AS VARCHAR) FROM nodes
++ SELECT count(*)::INTEGER FROM nodes
++ SELECT length(name) BETWEEN 3 AND 20 FROM nodes
++ SELECT row_number() OVER (PARTITION BY account ORDER BY name) AS rn, name FROM nodes
++ SELECT name, lag(name) OVER (ORDER BY name) FROM nodes
++ SELECT array_agg(name ORDER BY name) FROM nodes GROUP BY account
++ SELECT string_agg(name, ', ') FROM nodes GROUP BY kind
++ SELECT list_contains(array_agg(name), 'x') FROM nodes
++ SELECT unnest(tags) FROM nodes
++ SELECT t.key, t.value FROM nodes n, unnest(n.tags) AS u(t)
++ SELECT COLUMNS('n.*') FROM nodes
++ SELECT * EXCLUDE (tags) FROM nodes
++ SELECT * FROM (VALUES (1, 'a'), (2, 'b')) AS v(id, label)
++ SELECT * FROM nodes WHERE tf_type = 'aws_s3_bucket' LIMIT 5
++ SELECT * FROM nodes ORDER BY name
++ SELECT * FROM nodes LIMIT 5
++ SELECT * FROM nodes LIMIT 5 OFFSET 2
++ SELECT * FROM snapshot
++ SELECT current_user
++ FROM nodes
++ TABLE nodes
++ SELECT snapshot_id, oldest_source FROM snapshot
++ SELECT * FROM sources WHERE status <> 'ok'
++ SELECT name FROM nodes UNION SELECT name FROM nodes
++ SELECT name FROM nodes UNION ALL SELECT name FROM nodes
++ SELECT node_id FROM nodes EXCEPT SELECT from_id FROM edges
++ SELECT node_id FROM nodes INTERSECT SELECT to_id FROM edges
++ WITH t AS (SELECT * FROM nodes) SELECT count(*) FROM t
++ WITH a AS (SELECT * FROM nodes), b AS (SELECT * FROM a WHERE kind = 'resource') SELECT * FROM b
++ WITH RECURSIVE r(id, d) AS (SELECT 'x', 0 UNION SELECT e.to_id, r.d + 1 FROM r JOIN edges e ON e.from_id = r.id WHERE r.d < 3) SELECT * FROM r
++ SELECT * FROM blast('abc', 3)
++ SELECT * FROM cone('abc', 3)
++ SELECT n.name FROM blast('abc', 3) b JOIN nodes n USING (node_id)
++ SELECT * FROM nodes n, LATERAL (SELECT count(*) FROM edges e WHERE e.from_id = n.node_id) AS c
++ select Count(*) FROM NODES
++ SELECT "name" FROM "nodes"
+
+# --- refused: files, the system and the network ---
+- SELECT * FROM read_csv('/etc/passwd')
+- SELECT * FROM read_parquet('nodes.parquet')
+- SELECT * FROM read_json('/etc/passwd')
+- SELECT * FROM read_text('/etc/passwd')
+- SELECT * FROM read_blob('/etc/passwd')
+- SELECT * FROM '/etc/passwd'
+- SELECT * FROM 'nodes.parquet'
+- SELECT * FROM glob('/etc/*')
+- SELECT * FROM sniff_csv('/etc/passwd')
+- SELECT * FROM parquet_metadata('nodes.parquet')
+- SELECT * FROM duckdb_settings()
+- SELECT * FROM duckdb_tables()
+- SELECT * FROM duckdb_extensions()
+- SELECT * FROM pragma_database_list()
+- SELECT * FROM query('SELECT 1')
+- SELECT * FROM query_table('nodes')
+- SELECT * FROM range(10)
+- SELECT * FROM generate_series(1, 10)
+- SELECT * FROM repeat('a', 10)
+- SELECT * FROM information_schema.tables
+- SELECT * FROM sqlite_master
+- SELECT * FROM memory.main.nodes
+- SELECT * FROM main.nodes
+- SELECT * FROM snap.main.nodes
+- SELECT * FROM system.main.nodes
+- SELECT * FROM temp.main.nodes
+- SELECT * FROM pg_catalog.pg_tables
+- SELECT * FROM secrets
+- SELECT * FROM nodes_not_there
+- SELECT * FROM nodes USING SAMPLE 10
+- SELECT * FROM nodes TABLESAMPLE reservoir(5 ROWS)
+- SELECT * FROM nodes USING SAMPLE 10 PERCENT (system, 42)
+- SELECT * FROM main.blast('abc', 3)
+- SELECT * FROM memory.main.blast('abc', 3)
+- SELECT blast('abc', 3)
+- SELECT current_setting('threads')
+- SELECT getenv('HOME')
+- SELECT read_text('/etc/passwd')
+- SELECT getvariable('x')
+- SELECT version()
+- SELECT current_database()
+- SELECT current_schema()
+- SELECT uuid()
+- SELECT random()
+- SELECT now()
+- SELECT repeat('a', 1000000000)
+- SELECT main.lower(name) FROM nodes
+- SELECT memory.main.lower(name) FROM nodes
+- SELECT "READ_CSV"('/etc/passwd')
+- SELECT list_transform([1, 2], x -> x + 1)
+- SELECT [x for x in [1, 2]]
+- SELECT * FROM nodes WHERE name = $1
+- SELECT * FROM nodes WHERE name = ?
+- SELECT * FROM nodes WHERE name = $name
+- SELECT (SELECT count(*) FROM read_csv('/etc/passwd'))
+- SELECT * FROM nodes WHERE name IN (SELECT column0 FROM read_csv('/etc/passwd'))
+- WITH x AS (SELECT * FROM read_csv('/etc/passwd')) SELECT * FROM x
+- SELECT * FROM nodes, LATERAL (SELECT * FROM read_csv('/etc/passwd')) AS c
+- SELECT * FROM blast('a', 1) b, read_csv('/etc/passwd') c
+- SELECT * FROM nodes JOIN read_csv('/etc/passwd') ON true
+- SELECT * FROM (SELECT * FROM glob('/etc/*')) AS g
+- SELECT * FROM nodes UNION SELECT * FROM read_csv('/etc/passwd')
+
+# --- refused: more than one statement, none, or not a query ---
+- SELECT 1; SELECT 2
+- SELECT 1; COPY (SELECT 1) TO '/tmp/x'
+- SELECT 1; DROP TABLE nodes
+-
+- /* only a comment */
+- COPY (SELECT 1) TO '/tmp/x'
+- COPY nodes TO '/tmp/x'
+- COPY nodes FROM '/tmp/x'
+- EXPORT DATABASE '/tmp/x'
+- IMPORT DATABASE '/tmp/x'
+- INSTALL httpfs
+- LOAD httpfs
+- LOAD json
+- ATTACH '/tmp/x.db' AS x
+- ATTACH ':memory:' AS x
+- DETACH snap
+- USE memory
+- SET threads = 1
+- SET enable_external_access = true
+- SET lock_configuration = false
+- RESET threads
+- PRAGMA version
+- PRAGMA database_list
+- CALL pragma_version()
+- EXPLAIN SELECT 1
+- EXPLAIN ANALYZE SELECT 1
+- DESCRIBE nodes
+- SHOW TABLES
+- SHOW ALL TABLES
+- SUMMARIZE nodes
+- CREATE TABLE t AS SELECT 1
+- CREATE TEMP TABLE t AS SELECT 1
+- CREATE VIEW v AS SELECT 1
+- CREATE OR REPLACE VIEW nodes AS SELECT 1
+- CREATE MACRO m() AS 1
+- CREATE SECRET s (TYPE s3)
+- CREATE SEQUENCE s
+- INSERT INTO nodes VALUES (1)
+- UPDATE nodes SET name = 'x'
+- DELETE FROM nodes
+- DROP TABLE nodes
+- DROP VIEW nodes
+- ALTER TABLE nodes ADD COLUMN x INTEGER
+- TRUNCATE nodes
+- VACUUM
+- CHECKPOINT
+- FORCE CHECKPOINT
+- BEGIN
+- COMMIT
+- PIVOT nodes ON kind USING count(*)
+- UNPIVOT nodes ON name INTO NAME k VALUE v
+- selec 1
+- SELECT FROM WHERE
+- SELECT * FROM nodes WHERE

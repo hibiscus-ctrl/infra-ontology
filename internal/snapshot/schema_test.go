@@ -119,7 +119,8 @@ func TestAnswerValidates(t *testing.T) {
 	hash := "sha256:" + strings.Repeat("ab", 32)
 	a := snapshot.Answer{
 		Query: "SELECT 1", QueryHash: hash, SnapshotID: strings.Repeat("c", 64), Dialect: "infra-ontology/sql/v1",
-		Engine: "duckdb 1.2.0", RowCount: 1, ResultHash: hash,
+		Engine: "duckdb 2.0.1", RowCount: 1, ResultHash: hash,
+		Caps:   snapshot.AnswerCaps{MaxRows: 1000, MaxColumns: 64, MaxBytes: 4 << 20},
 		Limits: snapshot.AnswerLimits{OldestSource: "2026-11-25T09:12:00Z", FailedSources: 1, UncoveredTypes: []string{"aws_msk_cluster"}},
 	}
 	if err := validate(t, sch["answer"], a); err != nil {
