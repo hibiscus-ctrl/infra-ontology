@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/IgnatG/infraharvest/pkg/secretscan"
 	"github.com/IgnatG/infraharvest/pkg/tfstate"
 	"github.com/IgnatG/infraharvest/pkg/typemap"
 
@@ -285,7 +286,8 @@ func (b *builder) instanceNode(s *docState, in tfstate.Instance) snapshot.Node {
 	switch {
 	case isGenerated(in):
 		id, arn = "", ""
-	case Scrub(id) != id || Scrub(arn) != arn:
+	case secretscan.CredentialFormat(id) != "" || secretscan.CredentialFormat(arn) != "" ||
+		Scrub(id) != id || Scrub(arn) != arn:
 		// An ID that is, or holds, a credential (a token, or a URL with a
 		// user, a password or a query string) is never written down.
 		id, arn = "", ""

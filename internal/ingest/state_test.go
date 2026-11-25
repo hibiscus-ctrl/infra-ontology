@@ -518,3 +518,18 @@ func TestIDsThatHoldSecretsOrFreeTextAreNotKept(t *testing.T) {
 		t.Errorf("a plain URL id was dropped: %+v", n)
 	}
 }
+
+func TestMultiWordCredentialIDIsNotKept(t *testing.T) {
+	tm, err := typemap.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &builder{tm: tm}
+	// An Authorization value is a credential only as a whole: its words alone
+	// are not.
+	bearer := "Bearer abcdefghijklmnopqrstuvwxyz0123456789"
+	in := tfstate.Instance{Mode: "managed", Type: "aws_s3_object", Provider: `provider["registry.terraform.io/hashicorp/aws"]`, Address: "aws_s3_object.k", ID: bearer}
+	if n := b.instanceNode(&docState{loc: "s", source: "src"}, in); n.NativeID != "" {
+		t.Errorf("a bearer token id was kept: %q", n.NativeID)
+	}
+}
