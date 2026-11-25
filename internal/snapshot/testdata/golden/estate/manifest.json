@@ -1,0 +1,72 @@
+{
+  "format": "infra-ontology/snapshot/v1",
+  "format_minor": 0,
+  "snapshot_id": "56eda5cee85096e7c09c20074c7f7f315519b1f66ab23ab06c0695167a88afbc",
+  "parent_id": "",
+  "label": "baseline",
+  "created_at": "2026-11-25T10:15:00Z",
+  "tool": {
+    "name": "infra-ontology",
+    "version": "dev"
+  },
+  "status": "ok",
+  "tables": [
+    {
+      "name": "edges",
+      "file": "edges.parquet",
+      "sha256": "d3d7f96836c21379f282a66db5bb30818a215bcd939f801802be0b4419e4154c",
+      "rows": 15,
+      "schema": "infra-ontology/edge/v1"
+    },
+    {
+      "name": "nodes",
+      "file": "nodes.parquet",
+      "sha256": "e6f98c864b76d235083fb48991568c707f84bf19faff923ffe7a5e47aa4a5001",
+      "rows": 15,
+      "schema": "infra-ontology/node/v1"
+    },
+    {
+      "name": "sources",
+      "file": "sources.parquet",
+      "sha256": "02ee56bd149850dbcf13e5d31732140159fc35336aba2a3fa4da91af136c220d",
+      "rows": 3,
+      "schema": "infra-ontology/source/v1"
+    }
+  ],
+  "sources_summary": {
+    "count": 3,
+    "by_kind": {
+      "inventory": 1,
+      "state": 2
+    },
+    "oldest_collected_at": "2026-11-25T09:05:00Z",
+    "newest_collected_at": "2026-11-25T09:59:00Z"
+  },
+  "redaction": {
+    "hash_algorithm": "none",
+    "ids_hashed": false,
+    "addresses_dropped": false,
+    "tag_keys_dropped": [
+      "api_key",
+      "password"
+    ],
+    "all_tags_dropped": false
+  },
+  "coverage": {
+    "clouds": [
+      "aws"
+    ],
+    "accounts": [
+      "111111111111",
+      "222222222222"
+    ],
+    "types": [
+      "aws_instance",
+      "aws_s3_bucket",
+      "aws_subnet",
+      "aws_vpc"
+    ],
+    "failed_sources": []
+  },
+  "limits": "A fixture: not read from a real estate."
+}
