@@ -165,7 +165,9 @@ func readParquet[T any](data []byte, schema string) ([]T, error) {
 	}
 	r := parquet.NewGenericReader[T](f)
 	defer r.Close()
-	rows := make([]T, 0, f.NumRows())
+	// The row count comes from the file, which may not be ours yet: let append
+	// grow the slice instead of trusting it for an allocation.
+	var rows []T
 	for {
 		buf := make([]T, 1024) // fresh each time: the reader may reuse a row's slices
 		n, err := r.Read(buf)

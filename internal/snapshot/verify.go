@@ -198,6 +198,9 @@ func FindParent(dir string) (string, error) {
 	if m.ParentID == "" {
 		return "", nil
 	}
+	if !hexID.MatchString(m.ParentID) {
+		return "", fmt.Errorf("parent_id %q is not a snapshot id", m.ParentID)
+	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return "", err

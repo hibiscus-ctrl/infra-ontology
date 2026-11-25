@@ -11,8 +11,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/hibiscus-ctrl/infra-ontology/internal/snapshot"
 	"github.com/hibiscus-ctrl/infra-ontology/internal/version"
@@ -158,7 +160,7 @@ func printDiff(w io.Writer, d snapshot.Diff, a, b *snapshot.Loaded) {
 		fmt.Fprintf(w, "  - %s\n", describe(n))
 	}
 	for _, n := range d.Nodes.Changed {
-		fmt.Fprintf(w, "  ~ %s: %s\n", describe(n.NodeRef), strings.Join(n.Fields, ", "))
+		fmt.Fprintf(w, "  ~ %s: %s\n", describe(n.NodeRef), printable(strings.Join(n.Fields, ", ")))
 	}
 	fmt.Fprintf(w, "edges: %d added, %d removed, %d changed\n", s.EdgesAdded, s.EdgesRemoved, s.EdgesChanged)
 	for _, e := range d.Edges.Added {
@@ -168,30 +170,40 @@ func printDiff(w io.Writer, d snapshot.Diff, a, b *snapshot.Loaded) {
 		fmt.Fprintf(w, "  - %s\n", edge(e))
 	}
 	for _, e := range d.Edges.Changed {
-		fmt.Fprintf(w, "  ~ %s: %s\n", edge(e.EdgeRef), strings.Join(e.Fields, ", "))
+		fmt.Fprintf(w, "  ~ %s: %s\n", edge(e.EdgeRef), printable(strings.Join(e.Fields, ", ")))
 	}
 }
 
-func short(id string) string { return id[:min(12, len(id))] }
+func short(id string) string { return printable(id[:min(12, len(id))]) }
+
+// printable escapes control characters, so a value read from a snapshot
+// cannot move the cursor, recolour or rewrite the terminal it is printed to.
+func printable(s string) string {
+	if !strings.ContainsFunc(s, unicode.IsControl) {
+		return s
+	}
+	q := strconv.Quote(s)
+	return q[1 : len(q)-1]
+}
 
 func labelOf(m snapshot.Manifest) string {
 	if m.Label == "" {
 		return ""
 	}
-	return " (" + m.Label + ")"
+	return " (" + printable(m.Label) + ")"
 }
 
 func describe(n snapshot.NodeRef) string {
-	label := first(n.Address, n.Name, short(n.NodeID))
-	typ := first(n.Type, n.Kind)
+	label := printable(first(n.Address, n.Name, short(n.NodeID)))
+	typ := printable(first(n.Type, n.Kind))
 	if n.Account != "" {
-		return fmt.Sprintf("%s %s [%s]", typ, label, n.Account)
+		return fmt.Sprintf("%s %s [%s]", typ, label, printable(n.Account))
 	}
 	return typ + " " + label
 }
 
 func edge(e snapshot.EdgeRef) string {
-	return fmt.Sprintf("%s: %s -> %s", e.Kind, first(e.FromLabel, short(e.FromID)), first(e.ToLabel, short(e.ToID)))
+	return fmt.Sprintf("%s: %s -> %s", printable(e.Kind), printable(first(e.FromLabel, short(e.FromID))), printable(first(e.ToLabel, short(e.ToID))))
 }
 
 func first(s ...string) string {

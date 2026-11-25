@@ -213,3 +213,17 @@ func TestSnapshotUsageErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestPrintableEscapesControlCharacters(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		"plain label":           "plain label",
+		"red\x1b[31mtext":       `red\x1b[31mtext`,
+		"two\nlines":            `two\nlines`,
+		"bell\a and \"quotes\"": `bell\a and \"quotes\"`,
+	} {
+		if got := printable(in); got != want {
+			t.Errorf("printable(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

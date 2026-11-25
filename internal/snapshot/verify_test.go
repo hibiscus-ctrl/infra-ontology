@@ -157,3 +157,20 @@ func TestFindParent(t *testing.T) {
 		t.Error("FindParent found a parent that is not there")
 	}
 }
+
+func TestFindParentRejectsAMalformedParentID(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "child")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"abc", "zz" + strings.Repeat("0", 62)} {
+		raw := []byte(`{"parent_id":"` + id + `"}`)
+		if err := os.WriteFile(filepath.Join(dir, ManifestFile), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := FindParent(dir); err == nil || !strings.Contains(err.Error(), "not a snapshot id") {
+			t.Errorf("FindParent with parent_id %q: want an error, got %v", id, err)
+		}
+	}
+}
