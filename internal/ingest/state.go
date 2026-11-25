@@ -7,6 +7,12 @@
 // pkg/tfstate keeps, which is the address, the type and the ID or ARN of an
 // instance, and the places a state reads other states from, and writes
 // nothing else: no attribute value, no output value, no tag.
+//
+// It also reads the documents infraharvest exports of a live estate
+// (inventory/v1 and ocsf-inventory/v1) and joins them to the states: a
+// resource in both is one managed node, one only in an inventory has the
+// status the inventory gives it. From an inventory it keeps the same
+// identifiers and the tags that do not look like secrets.
 package ingest
 
 import (
@@ -64,6 +70,11 @@ type Options struct {
 	CollectedAt time.Time
 	// Collector and CollectorVersion name the program.
 	Collector, CollectorVersion string
+	// DropTags are tag keys to drop from the inventories' resources, and
+	// DropAllTags drops every tag. Tags that look like secrets are dropped
+	// either way.
+	DropTags    []string
+	DropAllTags bool
 }
 
 // Result is the rows of the states, and what they cannot tell you.
@@ -71,13 +82,21 @@ type Result struct {
 	Tables snapshot.Tables
 	// Limits is plain text for the manifest.
 	Limits string
-	// Failed is how many locations did not read.
+	// Failed is how many sources were not read in full: state locations
+	// that failed, and inventories that failed or count failed imports.
 	Failed int
+	// Redaction says which tag keys were dropped.
+	Redaction snapshot.Redaction
 }
 
-// Build turns what was read into rows. It fails only if no state was read at
-// all; a location that failed is a source with status failed.
-func Build(reads []Read, o Options) (Result, error) {
+// Build turns the states that were read into rows. It fails only if no state
+// was read at all; a location that failed is a source with status failed.
+func Build(reads []Read, o Options) (Result, error) { return BuildAll(reads, nil, o) }
+
+// BuildAll turns the states and the inventories that were read into rows. It
+// fails only if nothing was read at all; a location or a file that failed is a
+// source with status failed.
+func BuildAll(reads []Read, invs []InventoryRead, o Options) (Result, error) {
 	tm, err := typemap.New()
 	if err != nil {
 		return Result{}, err
@@ -86,6 +105,8 @@ func Build(reads []Read, o Options) (Result, error) {
 		tm: tm, o: o,
 		nodes: map[string]snapshot.Node{}, edges: map[edgeKey]snapshot.Edge{},
 		producers: map[string][]*docState{}, externals: map[string]bool{},
+		tagFilter: secretscan.NewTagFilter(o.DropTags, o.DropAllTags, nil),
+		invSource: map[string]string{}, joined: map[string]bool{},
 	}
 	var docs []tfstate.Document
 	for _, r := range reads {
@@ -95,7 +116,8 @@ func Build(reads []Read, o Options) (Result, error) {
 		}
 		docs = append(docs, r.Docs...)
 	}
-	if len(docs) == 0 {
+	b.hadStates = len(docs) > 0
+	if len(docs) == 0 && len(invs) == 0 {
 		return Result{}, fmt.Errorf("no state could be read:%s", b.failureList())
 	}
 	sort.SliceStable(docs, func(i, j int) bool { return Sanitise(docs[i].Source) < Sanitise(docs[j].Source) })
@@ -110,7 +132,16 @@ func Build(reads []Read, o Options) (Result, error) {
 	for _, s := range states {
 		b.addEdges(s)
 	}
-	return Result{Tables: b.tables(), Limits: b.limits(), Failed: len(b.failed)}, nil
+	if len(invs) > 0 {
+		b.addInventories(invs)
+		if len(b.inventories) == 0 && !b.hadStates {
+			return Result{}, fmt.Errorf("no state or inventory could be read:%s", b.failureList())
+		}
+	}
+	return Result{
+		Tables: b.tables(), Limits: b.limits(), Redaction: b.redaction(),
+		Failed: len(b.failed) + len(b.failedInventories) + b.partialInventories,
+	}, nil
 }
 
 type edgeKey struct{ kind, from, to string }
@@ -146,6 +177,21 @@ type builder struct {
 	externals map[string]bool
 
 	duplicates, noID, unresolved, unplaced int
+
+	// The inventories read, and what was made of them.
+	tagFilter          *secretscan.TagFilter
+	inventories        []Inventory
+	failedInventories  []InventoryRead
+	partialInventories int
+	hadStates          bool
+	// invSource maps a node to the first inventory that lists it; joined
+	// holds the nodes of a state that an inventory lists too; stateManaged
+	// is the nodes a state manages.
+	invSource    map[string]string
+	joined       map[string]bool
+	stateManaged []string
+
+	credentialIDs, tagsDropped, claimedManaged int
 }
 
 func (b *builder) fail(r Read) {
@@ -161,6 +207,9 @@ func (b *builder) fail(r Read) {
 func (b *builder) failureList() string {
 	var sb strings.Builder
 	for _, r := range b.failed {
+		sb.WriteString("\n  " + Scrub(r.Err.Error()))
+	}
+	for _, r := range b.failedInventories {
 		sb.WriteString("\n  " + Scrub(r.Err.Error()))
 	}
 	return sb.String()
@@ -450,8 +499,7 @@ func (b *builder) tables() snapshot.Tables {
 // limits is what the snapshot cannot tell you, in plain text.
 func (b *builder) limits() string {
 	var s []string
-	s = append(s, "Read from Terraform state only: no live inventory was read, so nothing is marked unmanaged.",
-		"Attribute values, output values and tags are never read: the only values kept from a resource are its id and ARN.")
+	s = append(s, b.readFrom()...)
 	if len(b.externals) > 0 {
 		var locs []string
 		for l := range b.externals {
@@ -477,7 +525,22 @@ func (b *builder) limits() string {
 	if b.noID > 0 {
 		s = append(s, strconv.Itoa(b.noID)+" instances have an id or ARN that looks like a credential and are identified by their address instead.")
 	}
+	s = append(s, b.inventoryLimits()...)
 	return strings.Join(s, " ")
+}
+
+// readFrom says what the snapshot was read from, and what that leaves out.
+func (b *builder) readFrom() []string {
+	switch {
+	case len(b.inventories) == 0:
+		return []string{"Read from Terraform state only: no live inventory was read, so nothing is marked unmanaged.",
+			"Attribute values, output values and tags are never read: the only values kept from a resource are its id and ARN."}
+	case !b.hadStates:
+		return []string{"Read from infraharvest inventories only: no Terraform state was read, so a resource has the status its inventory gives it and none is matched to a state.",
+			"Attribute values are never read: the only values kept from a resource are its id, ARN and tags, less the tags that look like secrets."}
+	}
+	return []string{"Read from Terraform state and infraharvest inventories: a resource in both is managed, and one only in an inventory has the status its inventory gives it (unmanaged, unless the inventory knows who manages it).",
+		"Attribute values and output values are never read: the only values kept from a resource are its id, ARN and, from an inventory, its tags, less the tags that look like secrets."}
 }
 
 // digest is the SHA-256 of what is kept of a state: its serial, lineage and
