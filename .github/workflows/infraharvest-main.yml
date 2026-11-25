@@ -1,0 +1,72 @@
+# Copyright 2026 Gabriel Ignat
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: infraharvest main
+
+# infra-ontology builds on infraharvest's public packages (pkg/tfstate,
+# pkg/typemap, pkg/secretscan), pinned in go.mod to a commit. This weekly run
+# moves that pin to infraharvest's current main in the workspace (nothing is
+# committed), then builds, vets and tests both builds of the command, so a
+# change over there that breaks the state reader or the secret filters shows
+# here before the pin is bumped. The run's summary names the commit it tested;
+# a red run is the report.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  against-main:
+    name: build and test against infraharvest main
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Move infraharvest to main
+        run: |
+          pinned=$(go list -m -f '{{.Version}}' github.com/IgnatG/infraharvest)
+          go get github.com/IgnatG/infraharvest@main
+          current=$(go list -m -f '{{.Version}}' github.com/IgnatG/infraharvest)
+          go mod tidy
+          {
+            echo "### infraharvest main"
+            echo
+            echo "- pinned in go.mod: \`$pinned\`"
+            echo "- tested: \`$current\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Build
+        run: go build -tags s3,gcs,azblob,hcp ./...
+      - name: Vet
+        run: go vet -tags s3,gcs,azblob,hcp ./...
+      - name: Test
+        run: go test -tags s3,gcs,azblob,hcp ./...
+      - name: Build, vet and test without the engine
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          go build -tags noduckdb,s3,gcs,azblob,hcp ./...
+          go vet -tags noduckdb,s3,gcs,azblob,hcp ./...
+          go test -tags noduckdb,s3,gcs,azblob,hcp ./...
+      - name: Report a failure
+        if: failure()
+        run: |
+          {
+            echo
+            echo "**Failed.** Something in infraharvest's current main breaks this build or its tests. Read the failing step above, then fix it here or in infraharvest before the pin is moved."
+          } >> "$GITHUB_STEP_SUMMARY"

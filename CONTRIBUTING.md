@@ -29,6 +29,8 @@ You need Git and Go (the version in `go.mod`). The query engine (DuckDB) needs c
 make fast         # formatting, vet, names, licences and workflows
 make test         # go test -race
 make lint         # golangci-lint, with the repository's config
+make golden       # rewrite the golden files (go test -update); review the diff
+make schemas      # every schema validates what the code writes
 ```
 
 `make fast` uses [reuse](https://reuse.software/) and [actionlint](https://github.com/rhysd/actionlint) when they are installed. CI runs every check anyway, on each pull request.

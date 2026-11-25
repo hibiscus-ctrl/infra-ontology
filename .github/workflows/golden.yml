@@ -1,0 +1,51 @@
+# Copyright 2026 Gabriel Ignat
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: Golden files
+
+# Regenerates every golden file (`make golden`: the tests run with -update)
+# and fails if one differs from what is committed: the snapshot bytes, the
+# ingest graphs and manifests, the graph/v1 export and the recorded parse
+# trees must come out the same. A change that moves one is meant to show in
+# the pull request's diff, and a dependency that moves one (the Parquet
+# writer, DuckDB) shows here on the weekly run.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "43 5 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  golden:
+    name: golden files are current
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Regenerate the golden files
+        run: make golden
+      - name: Check nothing changed
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --short
+            git diff --stat
+            echo "a golden file is not what the tests write: run make golden and review the diff" >&2
+            exit 1
+          fi

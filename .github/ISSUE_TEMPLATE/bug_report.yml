@@ -1,0 +1,98 @@
+# Copyright 2026 Gabriel Ignat
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: Bug report
+description: Something infra-ontology does wrong, such as a crash, a wrong answer, a snapshot that does not verify or a state it cannot read.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Thank you for reporting it. Report security vulnerabilities privately
+        instead, as SECURITY.md says. Before pasting output, remove what you
+        don't want public: account, subscription and project IDs, resource
+        names, bucket names and addresses. Never paste a state file or a
+        credential.
+  - type: input
+    id: version
+    attributes:
+      label: infra-ontology version
+      description: What `infra-ontology version` prints.
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: build
+    attributes:
+      label: Build
+      description: >-
+        The full build has the query engine; the `_noquery` build, and one made
+        with `-tags noduckdb`, does not.
+      options:
+        - Full release archive
+        - Release archive without the query engine (_noquery)
+        - Built from source with cgo
+        - Built from source with -tags noduckdb
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where it goes wrong
+      options:
+        - snapshot build (state)
+        - snapshot build (inventory)
+        - snapshot verify, sign or diff
+        - query or verify --answer
+        - serve-mcp
+        - export graph
+        - Something else
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: State backend
+      options:
+        - Local file or folder
+        - S3
+        - Google Cloud Storage
+        - Azure Blob Storage
+        - HCP Terraform or Terraform Enterprise
+        - Not about state
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and architecture
+      placeholder: Linux arm64, Debian 13
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: The command you ran, with its flags (hide names you don't want public).
+      render: sh
+      placeholder: >-
+        infra-ontology snapshot build --state s3://bucket/prefix --label prod
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: >-
+        What went wrong. For a wrong answer, the query and what you expected
+        to see; the answer's citation (`--json`) helps.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output
+      description: The error message and the lines around it, and the exit code.
+      render: text

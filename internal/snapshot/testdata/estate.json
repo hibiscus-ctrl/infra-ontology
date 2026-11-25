@@ -2,7 +2,6 @@
   "created_at": "2026-11-25T10:15:00Z",
   "edges": [
     {
-      "edge_id": "",
       "from_id": "6ac4f2c2942b8b2b0a18edc397b70428599be08d7f42b300cf969a69496f6068",
       "to_id": "561eee651d9be57a4c2ecc6e3f0c4fbe1839cfe9ed35c2ccb56d8904ea127749",
       "kind": "depends_on",
@@ -11,7 +10,6 @@
       "source_id": "state-prod"
     },
     {
-      "edge_id": "",
       "from_id": "5ab51bb328bab39d1be7d3004b16315f47214fb0d1a7bde62ee5018b5893150e",
       "to_id": "6ac4f2c2942b8b2b0a18edc397b70428599be08d7f42b300cf969a69496f6068",
       "kind": "depends_on",
@@ -20,7 +18,6 @@
       "source_id": "state-prod"
     },
     {
-      "edge_id": "",
       "from_id": "561eee651d9be57a4c2ecc6e3f0c4fbe1839cfe9ed35c2ccb56d8904ea127749",
       "to_id": "636add12b7407ba7097989d697f54a424094d75f09a1c491734cc1356c75ebbe",
       "kind": "contained_in",
@@ -29,7 +26,6 @@
       "source_id": "state-prod"
     },
     {
-      "edge_id": "",
       "from_id": "6ac4f2c2942b8b2b0a18edc397b70428599be08d7f42b300cf969a69496f6068",
       "to_id": "636add12b7407ba7097989d697f54a424094d75f09a1c491734cc1356c75ebbe",
       "kind": "contained_in",
@@ -38,7 +34,6 @@
       "source_id": "state-prod"
     },
     {
-      "edge_id": "",
       "from_id": "636add12b7407ba7097989d697f54a424094d75f09a1c491734cc1356c75ebbe",
       "to_id": "c97717d5a8bb7084ea736d8ff65fca278a93c794ca9426f8dea03ea0a316dd55",
       "kind": "contained_in",
@@ -47,7 +42,6 @@
       "source_id": "state-prod"
     },
     {
-      "edge_id": "",
       "from_id": "5ab51bb328bab39d1be7d3004b16315f47214fb0d1a7bde62ee5018b5893150e",
       "to_id": "c97717d5a8bb7084ea736d8ff65fca278a93c794ca9426f8dea03ea0a316dd55",
       "kind": "defined_in",
@@ -56,7 +50,6 @@
       "source_id": "state-prod"
     },
     {
-      "edge_id": "",
       "from_id": "274325b517f5adf48f491d7e63066ec8b7b9245e6225dc1abdbc9ae9b24c88ba",
       "to_id": "c2a274df94ee0136a3649281000111e6f2500d4047a0f2219cc6589fbac7c1bc",
       "kind": "contained_in",
@@ -65,7 +58,6 @@
       "source_id": "inventory-aws"
     },
     {
-      "edge_id": "",
       "from_id": "7fc61c441ff72a254aafc869119a3c6a3236e4cc5c74ace6774e21bd51acbacf",
       "to_id": "cb248be177e7d1fc9742b9e6f6cfc88f32dda9b687c9bb7530ded55901042fc6",
       "kind": "depends_on",
@@ -74,7 +66,6 @@
       "source_id": "state-staging"
     },
     {
-      "edge_id": "",
       "from_id": "4d624770c1dae04f506eabdbff1d82daf6d7b4b7152c697b6ead4f17c7b73793",
       "to_id": "7fc61c441ff72a254aafc869119a3c6a3236e4cc5c74ace6774e21bd51acbacf",
       "kind": "depends_on",
@@ -83,7 +74,6 @@
       "source_id": "state-staging"
     },
     {
-      "edge_id": "",
       "from_id": "cb248be177e7d1fc9742b9e6f6cfc88f32dda9b687c9bb7530ded55901042fc6",
       "to_id": "a6fe4df2d70f19403fcf712d0aa4665b1a6560e763e4b21d69f0b544fac2a3a9",
       "kind": "contained_in",
@@ -92,7 +82,6 @@
       "source_id": "state-staging"
     },
     {
-      "edge_id": "",
       "from_id": "7fc61c441ff72a254aafc869119a3c6a3236e4cc5c74ace6774e21bd51acbacf",
       "to_id": "a6fe4df2d70f19403fcf712d0aa4665b1a6560e763e4b21d69f0b544fac2a3a9",
       "kind": "contained_in",
@@ -101,7 +90,6 @@
       "source_id": "state-staging"
     },
     {
-      "edge_id": "",
       "from_id": "a6fe4df2d70f19403fcf712d0aa4665b1a6560e763e4b21d69f0b544fac2a3a9",
       "to_id": "d4950dc05158b7873d22669a053e6183530b7a9e71e13dc378d2f82beef42394",
       "kind": "contained_in",
@@ -110,7 +98,6 @@
       "source_id": "state-staging"
     },
     {
-      "edge_id": "",
       "from_id": "4d624770c1dae04f506eabdbff1d82daf6d7b4b7152c697b6ead4f17c7b73793",
       "to_id": "d4950dc05158b7873d22669a053e6183530b7a9e71e13dc378d2f82beef42394",
       "kind": "defined_in",
@@ -119,7 +106,6 @@
       "source_id": "state-staging"
     },
     {
-      "edge_id": "",
       "from_id": "d4950dc05158b7873d22669a053e6183530b7a9e71e13dc378d2f82beef42394",
       "to_id": "c97717d5a8bb7084ea736d8ff65fca278a93c794ca9426f8dea03ea0a316dd55",
       "kind": "reads_state_of",
@@ -128,7 +114,6 @@
       "source_id": "state-staging"
     },
     {
-      "edge_id": "",
       "from_id": "d4950dc05158b7873d22669a053e6183530b7a9e71e13dc378d2f82beef42394",
       "to_id": "39bdb03809a20c20c43a099c2967f99810c7ae5166cd00229c71ed5140144ce6",
       "kind": "reads_state_of",
