@@ -8,7 +8,7 @@ It runs on your laptop or in your CI, with your own credentials. It holds no sec
 
 ## Status
 
-**Early: not yet usable on a real estate.** The snapshot format is written: the JSON Schemas, a pure-Go Parquet writer with stable bytes and a content-addressed manifest, `snapshot verify` and `diff`. So is the query layer: read-only SQL over a snapshot with row caps and a cited answer (`query`, `verify --answer`). The MCP server (`serve-mcp`, [docs/mcp.md](docs/mcp.md)) is written too. So is a lossy export to infraharvest's `graph/v1`, which Terragram draws (`export graph`, [docs/export.md](docs/export.md)). `snapshot build --state` reads Terraform state from files, S3, Cloud Storage, Azure Blob Storage and HCP Terraform into a snapshot ([docs/state.md](docs/state.md)); `snapshot build --inventory` reads infraharvest's `inventory/v1` and `ocsf-inventory/v1` exports, joins them to the state and marks what no state holds as unmanaged ([docs/inventory.md](docs/inventory.md)); `--from-json` stays as a path for tests. Nothing here is stable, and the name and the module path may still change.
+**Early: not yet usable on a real estate.** The snapshot format is written: the JSON Schemas, a pure-Go Parquet writer with stable bytes and a content-addressed manifest, `snapshot verify` and `diff`, and an optional Sigstore signature over the manifest (`snapshot sign`, [docs/signing.md](docs/signing.md)). So is the query layer: read-only SQL over a snapshot with row caps and a cited answer (`query`, `verify --answer`). The MCP server (`serve-mcp`, [docs/mcp.md](docs/mcp.md)) is written too. So is a lossy export to infraharvest's `graph/v1`, which Terragram draws (`export graph`, [docs/export.md](docs/export.md)). `snapshot build --state` reads Terraform state from files, S3, Cloud Storage, Azure Blob Storage and HCP Terraform into a snapshot ([docs/state.md](docs/state.md)); `snapshot build --inventory` reads infraharvest's `inventory/v1` and `ocsf-inventory/v1` exports, joins them to the state and marks what no state holds as unmanaged ([docs/inventory.md](docs/inventory.md)); `--from-json` stays as a path for tests. Nothing here is stable, and the name and the module path may still change.
 
 ## What it will do
 
@@ -41,6 +41,8 @@ make test
 
 # a snapshot is a folder; these work offline
 ./infra-ontology snapshot verify <snapshot-folder>   # check a snapshot against its manifest, offline
+./infra-ontology snapshot sign --key cosign.key <snapshot-folder>   # sign the manifest (Sigstore bundle); or --keyless in CI
+./infra-ontology snapshot verify --key cosign.pub <snapshot-folder>  # ... and check the signature
 ./infra-ontology diff <a> <b>                       # what changed from snapshot a to snapshot b
 ./infra-ontology export graph <snapshot-folder> -o graph.json   # a graph/v1 document for Terragram (lossy)
 ./infra-ontology query <snapshot-folder> --stored unmanaged   # cited, read-only SQL (needs the engine)

@@ -22,6 +22,7 @@ import (
 	"github.com/IgnatG/infraharvest/pkg/secretscan"
 
 	"github.com/hibiscus-ctrl/infra-ontology/internal/ingest"
+	"github.com/hibiscus-ctrl/infra-ontology/internal/signing"
 	"github.com/hibiscus-ctrl/infra-ontology/internal/snapshot"
 	"github.com/hibiscus-ctrl/infra-ontology/internal/version"
 )
@@ -69,21 +70,38 @@ func writeJSON(w io.Writer, v any) {
 	_ = enc.Encode(v)
 }
 
-// runVerify is `snapshot verify`.
+// runVerify is `snapshot verify`: the manifest, the tables and the rows, and
+// the signature when there is one. A signature that is not valid fails it; no
+// signature does not, unless --require-signature says one must verify.
 func runVerify(args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("snapshot verify", stderr)
 	asJSON := fs.Bool("json", false, "print the result as JSON")
+	vf := addVerifyFlags(fs)
 	dirs, ok := parse(fs, args, 1, 1, stderr)
 	if !ok {
 		return exitUsage
 	}
-	res := snapshot.Verify(dirs[0])
+	v, err := vf.check()
+	if err != nil {
+		fmt.Fprintf(stderr, "infra-ontology snapshot verify: %v\n", err)
+		return exitUsage
+	}
+	// The signature is checked over the manifest bytes the verification read.
+	res, manifest := snapshot.VerifyWithManifest(dirs[0])
+	sig := signing.CheckBytes(dirs[0], manifest, v)
+	switch {
+	case sig.State == signing.Invalid:
+		res.Problems = append(res.Problems, signing.File+": "+sig.Problem)
+	case *vf.require && sig.State != signing.Verified:
+		res.Problems = append(res.Problems, "no signature: --require-signature wants one that verifies")
+	}
 	switch {
 	case *asJSON:
 		writeJSON(stdout, struct {
 			OK bool `json:"ok"`
 			snapshot.VerifyResult
-		}{res.OK(), res})
+			Signature signing.Status `json:"signature"`
+		}{res.OK(), res, sig})
 	case res.OK():
 		fmt.Fprintf(stdout, "ok: %s\n  snapshot  %s\n", res.Dir, res.SnapshotID)
 		if res.ParentID != "" {
@@ -95,10 +113,14 @@ func runVerify(args []string, stdout, stderr io.Writer) int {
 		for _, t := range res.Tables {
 			fmt.Fprintf(stdout, "  %-9s %d rows, sha256 %s\n", t.Name, t.Rows, t.SHA256)
 		}
+		fmt.Fprintf(stdout, "  signature %s\n", printable(sig.String()))
+		if sig.State == signing.SignedUnverified {
+			fmt.Fprintln(stdout, "            not checked: give --key, or --certificate-identity and --certificate-oidc-issuer")
+		}
 	default:
 		fmt.Fprintf(stdout, "FAILED: %s does not verify\n", res.Dir)
 		for _, p := range res.Problems {
-			fmt.Fprintf(stdout, "  - %s\n", p)
+			fmt.Fprintf(stdout, "  - %s\n", printable(p))
 		}
 	}
 	if !res.OK() {

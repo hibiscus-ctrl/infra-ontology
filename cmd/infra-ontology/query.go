@@ -241,6 +241,7 @@ func runVerifyTop(args []string, stdout, stderr io.Writer) int {
 	root := fs.String("snapshots", filepath.Join(".infra-ontology", "snapshots"), "the folder of snapshots to look in")
 	asJSON := fs.Bool("json", false, "print the result as JSON")
 	timeout := fs.Duration("timeout", query.DefaultTimeout, "stop the re-run after this long")
+	vf := addVerifyFlags(fs)
 	dirs, ok := parse(fs, args, 0, 1, stderr)
 	if !ok {
 		return exitUsage
@@ -254,6 +255,10 @@ func runVerifyTop(args []string, stdout, stderr io.Writer) int {
 	}
 	if len(dirs) > 0 {
 		fmt.Fprintln(stderr, "infra-ontology verify: name the snapshot with --snapshot DIR")
+		return exitUsage
+	}
+	if vf.set() {
+		fmt.Fprintln(stderr, "infra-ontology verify: the signature flags check a snapshot folder; run verify on the folder without --answer")
 		return exitUsage
 	}
 	a, err := readAnswer(*answer)

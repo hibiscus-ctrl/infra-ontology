@@ -36,6 +36,17 @@ snap=$(find "$work/snapshots" -mindepth 1 -maxdepth 1 -type d | head -n 1)
 # A state file reads into a snapshot that verifies.
 "$bin" snapshot build --state internal/ingest/testdata/states/net.tfstate --out "$work/state-snapshots" >/dev/null
 "$bin" snapshot verify "$(find "$work/state-snapshots" -mindepth 1 -maxdepth 1 -type d | head -n 1)" >/dev/null
+# A snapshot signs with a key and verifies with its public key, offline: the
+# Sigstore client is in every variant. Skipped where openssl cannot make a key.
+if command -v openssl >/dev/null 2>&1 &&
+  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$work/sign.key" 2>/dev/null &&
+  openssl pkey -in "$work/sign.key" -pubout -out "$work/sign.pub" 2>/dev/null; then
+  "$bin" snapshot sign --key "$work/sign.key" "$snap" >/dev/null
+  "$bin" snapshot verify --key "$work/sign.pub" --require-signature "$snap" | grep -q 'signature verified' ||
+    { echo "smoke: the signature did not verify" >&2; exit 1; }
+else
+  echo "smoke: no openssl key to sign with; signing is not exercised"
+fi
 
 sql='SELECT count(*) AS n FROM nodes'
 case "$variant" in

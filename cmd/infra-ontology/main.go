@@ -29,7 +29,12 @@ const (
 const usage = `usage: infra-ontology <command> [flags]
 
 commands:
-  snapshot verify [--json] <dir>      check a snapshot folder against its manifest
+  snapshot verify [--json] <dir>      check a snapshot folder against its manifest, and its
+                                      signature if it has one (--key PUBKEY, or --certificate-identity
+                                      and --certificate-oidc-issuer; --trusted-root FILE,
+                                      --require-signature)
+  snapshot sign (--key FILE | --keyless) [--force] <dir>
+                                      sign the manifest: write manifest.sig.json, a Sigstore bundle
   query <dir> --sql TEXT              read-only SQL over a snapshot, with row caps and a
   query <dir> --stored NAME [--param k=v ...]
                                       citation of the snapshot, query and result
@@ -41,6 +46,7 @@ commands:
   serve-mcp <dir> [--tools LIST] [--audit-log FILE]
                                       an MCP server on stdio over a verified snapshot:
                                       inventory, blast_radius, query, snapshot_info
+                                      (the signature flags of verify check its signature)
   export graph [-o FILE] [--cloud NAME] <dir>
                                       write a snapshot as an infraharvest graph/v1 document
                                       (lossy) that Terragram can draw
@@ -92,7 +98,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func runSnapshot(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprint(stderr, "infra-ontology snapshot: say what to do: verify or build\n\n"+usage)
+		fmt.Fprint(stderr, "infra-ontology snapshot: say what to do: verify, sign or build\n\n"+usage)
 		return exitUsage
 	}
 	switch args[0] {
@@ -100,6 +106,8 @@ func runSnapshot(args []string, stdout, stderr io.Writer) int {
 		return runVerify(args[1:], stdout, stderr)
 	case "build":
 		return runBuild(args[1:], stdout, stderr)
+	case "sign":
+		return runSign(args[1:], stdout, stderr)
 	}
 	fmt.Fprintf(stderr, "infra-ontology snapshot: unknown subcommand %q\n\n%s", args[0], usage)
 	return exitUsage

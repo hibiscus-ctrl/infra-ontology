@@ -19,6 +19,10 @@ type Loaded struct {
 	Dir      string
 	Manifest Manifest
 	Tables   Tables
+	// ManifestRaw is the exact bytes of manifest.json that were hashed and
+	// parsed. A signature over the manifest is checked against these, not
+	// against a second read of the file, which could have changed since.
+	ManifestRaw []byte
 }
 
 // VerifyResult is what Verify found. It does not stop at the first problem.
@@ -43,44 +47,52 @@ func (r VerifyResult) Error() string { return strings.Join(r.Problems, "\n") }
 // table is there, and the rows are consistent (ids unique, every edge joins two
 // nodes, every row cites a source). Change a byte of any file and it fails.
 func Verify(dir string) VerifyResult {
-	_, res := load(dir)
+	_, res, _ := load(dir)
 	return res
+}
+
+// VerifyWithManifest is Verify that also returns the bytes of manifest.json it
+// checked, nil if it could not read the file. Check a signature against these
+// bytes, so that what is signed is what was verified.
+func VerifyWithManifest(dir string) (VerifyResult, []byte) {
+	_, res, raw := load(dir)
+	return res, raw
 }
 
 // Load verifies a snapshot folder and, if it verified, reads its rows. It
 // returns the verification problems as an error otherwise, so nothing reads a
 // tampered table.
 func Load(dir string) (*Loaded, error) {
-	l, res := load(dir)
+	l, res, _ := load(dir)
 	if !res.OK() {
 		return nil, fmt.Errorf("%s does not verify:\n%s", dir, res.Error())
 	}
 	return l, nil
 }
 
-func load(dir string) (*Loaded, VerifyResult) {
+func load(dir string) (*Loaded, VerifyResult, []byte) {
 	res := VerifyResult{Dir: dir, Problems: []string{}}
 	fail := func(format string, args ...any) { res.Problems = append(res.Problems, fmt.Sprintf(format, args...)) }
 
 	raw, err := os.ReadFile(filepath.Join(dir, ManifestFile))
 	if err != nil {
 		fail("%s: %v", ManifestFile, reason(err))
-		return nil, res
+		return nil, res, raw
 	}
 	var m Manifest
 	if err := json.Unmarshal(raw, &m); err != nil {
 		fail("%s: not a manifest: %v", ManifestFile, err)
-		return nil, res
+		return nil, res, raw
 	}
 	res.SnapshotID, res.ParentID, res.Label, res.Tables = m.SnapshotID, m.ParentID, m.Label, m.Tables
 	if m.Format != Format {
 		fail("%s: format %q is not supported (this reader reads %q)", ManifestFile, m.Format, Format)
-		return nil, res
+		return nil, res, raw
 	}
 	id, err := ManifestID(raw)
 	if err != nil {
 		fail("%s: %v", ManifestFile, err)
-		return nil, res
+		return nil, res, raw
 	}
 	if id != m.SnapshotID {
 		fail("%s: snapshot_id is %q but the manifest hashes to %q", ManifestFile, m.SnapshotID, id)
@@ -129,7 +141,7 @@ func load(dir string) (*Loaded, VerifyResult) {
 		}
 	}
 	if !res.OK() {
-		return nil, res
+		return nil, res, raw
 	}
 
 	var t Tables
@@ -168,9 +180,9 @@ func load(dir string) (*Loaded, VerifyResult) {
 		}
 	}
 	if !res.OK() {
-		return nil, res
+		return nil, res, raw
 	}
-	return &Loaded{Dir: dir, Manifest: m, Tables: t}, res
+	return &Loaded{Dir: dir, Manifest: m, Tables: t, ManifestRaw: raw}, res, raw
 }
 
 func schemaOf(table string) string {
