@@ -19,6 +19,10 @@ They are about 80 MB unpacked.
 
 **Without the query engine.** Every other platform gets a pure-Go build, built with `-tags noduckdb`, whose name ends in `_noquery` before the extension: for example `_linux_386_noquery.tar.gz`, `_linux_riscv64_noquery.tar.gz`, `_freebsd_amd64_noquery.tar.gz` and `_windows_amd64_noquery.zip`. Windows has no build with the query engine yet: DuckDB's prebuilt Windows library does not link with the current MinGW-w64 toolchain. Linux on x86-64 and Arm64 also have a `_noquery` archive, for images that cannot run the full build (below). A `_noquery` binary is about 9 MB. `snapshot build`, `snapshot verify` and `diff` work as usual; `query`, `verify --answer` and `serve-mcp` say that the build has no query engine and print the SQL to run with DuckDB on the snapshot folder.
 
+## Which backends the archives read
+
+The release archives read Terraform state from local files and from S3, Cloud Storage, Azure Blob Storage and HCP Terraform (`snapshot build --state`, see [state.md](state.md)). A build from source reads local files only unless you name the stores: `go build -tags s3,gcs,azblob,hcp ./cmd/infra-ontology`.
+
 ## What the full Linux build needs
 
 The full Linux binaries link the C++ runtime dynamically: `libstdc++.so.6` and `libgcc_s.so.1`, next to glibc (`libm`, `libc`). They run on a glibc distribution that has libstdc++ installed, and they do not run on `scratch`, distroless-static or Alpine (musl). On Debian or Ubuntu, `libstdc++6` is almost always there already; if `ldd infra-ontology` says `not found`, install it:

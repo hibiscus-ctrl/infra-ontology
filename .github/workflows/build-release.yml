@@ -10,7 +10,10 @@ name: Build release binaries
 # The query engine is DuckDB, which needs cgo. cgo does not cross-compile
 # cleanly, so each platform the engine ships prebuilt libraries for is built on
 # a runner of its own platform. Every other platform gets a pure-Go build with
-# `-tags noduckdb`, named `_noquery`, from one Linux runner.
+# `-tags noduckdb`, named `_noquery`, from one Linux runner. Every archive is
+# built with the four state stores (`-tags s3,gcs,azblob,hcp`), so that
+# `snapshot build --state` reads S3, Cloud Storage, Blob Storage and HCP
+# Terraform as well as files.
 on:
   workflow_call:
     inputs:
@@ -86,7 +89,7 @@ jobs:
           [ "$GOOS" = windows ] && ext=.exe
           out="out/bin-$GOOS-$GOARCH"
           mkdir -p "$out"
-          go build -trimpath \
+          go build -trimpath -tags s3,gcs,azblob,hcp \
             -ldflags "-s -w -X github.com/hibiscus-ctrl/infra-ontology/internal/version.Version=v$VERSION" \
             -o "$out/infra-ontology$ext" ./cmd/infra-ontology
           ls -l "$out"
@@ -95,6 +98,11 @@ jobs:
           ext=
           [ "$GOOS" = windows ] && ext=.exe
           scripts/smoke-release.sh "out/bin-$GOOS-$GOARCH/infra-ontology$ext" query "v$VERSION"
+      - name: Check the binary links the state stores
+        run: |
+          ext=
+          [ "$GOOS" = windows ] && ext=.exe
+          scripts/check-stores.sh "out/bin-$GOOS-$GOARCH/infra-ontology$ext"
       - name: Check the libraries the binary links
         if: runner.os == 'Linux'
         run: scripts/check-ldd.sh "out/bin-$GOOS-$GOARCH/infra-ontology"
@@ -138,16 +146,20 @@ jobs:
             ext=
             [ "$goos" = windows ] && ext=.exe
             echo "$target"
-            GOOS=$goos GOARCH=$goarch go build -trimpath -tags noduckdb \
+            GOOS=$goos GOARCH=$goarch go build -trimpath -tags noduckdb,s3,gcs,azblob,hcp \
               -ldflags "-s -w -X github.com/hibiscus-ctrl/infra-ontology/internal/version.Version=v$VERSION" \
               -o "out/bin-$goos-$goarch-noquery/infra-ontology$ext" ./cmd/infra-ontology
           done
       - name: Run the binary
         run: scripts/smoke-release.sh out/bin-linux-amd64-noquery/infra-ontology noquery "v$VERSION"
+      - name: Check the binary links the state stores
+        run: scripts/check-stores.sh out/bin-linux-amd64-noquery/infra-ontology
       - name: Check the binary links no engine
         run: |
           # Look at the linked modules only: the build settings name the noduckdb tag.
-          if go version -m out/bin-linux-amd64-noquery/infra-ontology | awk '$1 == "dep" {print $2}' | grep -iE 'duckdb|apache/arrow'; then
+          # apache/arrow-go is not the engine: the Azure SDK brings it in with the
+          # azblob store.
+          if go version -m out/bin-linux-amd64-noquery/infra-ontology | awk '$1 == "dep" {print $2}' | grep -iE 'duckdb'; then
             echo "a noquery binary depends on the engine" >&2
             exit 1
           fi

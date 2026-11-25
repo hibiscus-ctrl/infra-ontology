@@ -33,6 +33,9 @@ trap 'rm -rf "$work"' EXIT
 "$bin" snapshot build --from-json internal/snapshot/testdata/estate.json --out "$work/snapshots" >/dev/null
 snap=$(find "$work/snapshots" -mindepth 1 -maxdepth 1 -type d | head -n 1)
 "$bin" snapshot verify "$snap" >/dev/null
+# A state file reads into a snapshot that verifies.
+"$bin" snapshot build --state internal/ingest/testdata/states/net.tfstate --out "$work/state-snapshots" >/dev/null
+"$bin" snapshot verify "$(find "$work/state-snapshots" -mindepth 1 -maxdepth 1 -type d | head -n 1)" >/dev/null
 
 sql='SELECT count(*) AS n FROM nodes'
 case "$variant" in

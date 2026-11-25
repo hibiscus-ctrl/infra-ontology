@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Command infra-ontology builds a read-only, cited snapshot of a cloud estate
-// and its Terraform state. So far it can verify a snapshot, compare two, answer
-// read-only SQL over one, write one as a graph/v1 document and (as a test and
-// development path) build one from a JSON file; reading state and inventory
+// and its Terraform state. It reads Terraform state into a snapshot (from files
+// and, in a build that links the stores, from S3, Cloud Storage, Blob Storage
+// and HCP Terraform), verifies a snapshot, compares two, answers read-only SQL
+// over one and writes one as a graph/v1 document. Reading a live inventory
 // comes later.
 package main
 
@@ -21,6 +22,7 @@ const (
 	exitOK           = 0
 	exitFailed       = 1
 	exitUsage        = 2
+	exitPartial      = 3 // a snapshot was written, but some sources did not read
 	exitVerifyFailed = 4 // a snapshot or an answer did not verify
 )
 
@@ -42,12 +44,15 @@ commands:
   export graph [-o FILE] [--cloud NAME] <dir>
                                       write a snapshot as an infraharvest graph/v1 document
                                       (lossy) that Terragram can draw
-  snapshot build --from-json FILE     build a snapshot from a JSON file (for tests
-                                      and development; state and inventory readers
-                                      come later)
+  snapshot build --state LOCATION [--state LOCATION ...] [--out DIR] [--label TEXT]
+                                      read Terraform state into a snapshot: a path, s3://bucket/prefix,
+                                      gs://bucket/prefix, azblob://account/container/prefix or
+                                      hcp://organization/workspace
+  snapshot build --from-json FILE     build a snapshot from a JSON file (for tests and development)
   version                             print the version
 
-exit codes: 0 ok, 1 failed, 2 usage error, 4 a snapshot or an answer did not verify
+exit codes: 0 ok, 1 failed, 2 usage error, 3 partial snapshot (some state did not read),
+            4 a snapshot or an answer did not verify
 `
 
 func main() {
