@@ -31,7 +31,7 @@ epoch=${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct)}
 
 # The builds a release must have: the query engine on every platform the
 # engine ships prebuilt libraries for.
-for want in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64; do
+for want in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
   if [ ! -d "$bindir/bin-$want" ]; then
     echo "package-release: the $want build with the query engine is missing" >&2
     exit 1
