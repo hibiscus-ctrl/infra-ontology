@@ -22,6 +22,10 @@ const (
 	NodesFile    = "nodes.parquet"
 	EdgesFile    = "edges.parquet"
 	SourcesFile  = "sources.parquet"
+	// SignatureFile is the optional Sigstore bundle over manifest.json. It is no part
+	// of the snapshot: its id and its table list leave it out, so no edit of it
+	// changes either.
+	SignatureFile = "manifest.sig.json"
 )
 
 // Node kinds.

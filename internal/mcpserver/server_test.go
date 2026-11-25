@@ -20,6 +20,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/hibiscus-ctrl/infra-ontology/internal/query"
+	"github.com/hibiscus-ctrl/infra-ontology/internal/signing"
+	"github.com/hibiscus-ctrl/infra-ontology/internal/signing/signingtest"
 )
 
 var estate = filepath.Join("..", "snapshot", "testdata", "golden", "estate")
@@ -594,5 +596,76 @@ func TestConcurrentCallsAreAnsweredAndAudited(t *testing.T) {
 	wg.Wait()
 	if n := len(readAudit(t, audit)); n != 24 {
 		t.Errorf("%d audit lines, want 24", n)
+	}
+}
+
+func signedEstate(t *testing.T) (dir string, keys signingtest.Keys) {
+	t.Helper()
+	dir, keys = copyEstate(t), signingtest.NewKeys(t, "p256")
+	if err := signing.SignWithKey(dir, keys.Private, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	return dir, keys
+}
+
+func TestSnapshotInfoReportsTheSignature(t *testing.T) {
+	status := func(cfg Config) signing.Status {
+		t.Helper()
+		out, _ := call[InfoOut](t, connect(t, cfg), "snapshot_info", nil)
+		return out.Signature
+	}
+	if st := status(Config{Dir: copyEstate(t)}); st.State != signing.Unsigned {
+		t.Errorf("an unsigned snapshot: %+v", st)
+	}
+	dir, keys := signedEstate(t)
+	if st := status(Config{Dir: dir}); st.State != signing.SignedUnverified || st.Mode != signing.ModeKey || st.Signer != "" {
+		t.Errorf("signed, no verifier: %+v", st)
+	}
+	st := status(Config{Dir: dir, Signature: signing.Verifier{KeyFile: keys.Public}, RequireSignature: true})
+	if st.State != signing.Verified || !strings.HasPrefix(st.Signer, "sha256:") {
+		t.Errorf("signed, with the key: %+v", st)
+	}
+	// A verifier and an unsigned snapshot: reported as unsigned, and served.
+	if st := status(Config{Dir: copyEstate(t), Signature: signing.Verifier{KeyFile: keys.Public}}); st.State != signing.Unsigned {
+		t.Errorf("unsigned, with a key: %+v", st)
+	}
+}
+
+func TestTheInstructionsSayHowTheSnapshotIsSigned(t *testing.T) {
+	dir, keys := signedEstate(t)
+	cs := connect(t, Config{Dir: dir, Signature: signing.Verifier{KeyFile: keys.Public}})
+	if got := cs.InitializeResult().Instructions; !strings.Contains(got, "signature: verified (key: sha256:") {
+		t.Errorf("instructions: %s", got)
+	}
+}
+
+func TestRefusesToServeABadOrMissingSignature(t *testing.T) {
+	dir, keys := signedEstate(t)
+	other := signingtest.NewKeys(t, "p256")
+	garbage := copyEstate(t)
+	if err := os.WriteFile(filepath.Join(garbage, signing.File), []byte("not a bundle"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, cfg := range map[string]Config{
+		"another key":                 {Dir: dir, Signature: signing.Verifier{KeyFile: other.Public}},
+		"a file that is no bundle":    {Dir: garbage},
+		"unsigned, required":          {Dir: copyEstate(t), Signature: signing.Verifier{KeyFile: keys.Public}, RequireSignature: true},
+		"signed, required, unchecked": {Dir: dir, RequireSignature: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			audit := &lockedBuffer{}
+			cfg.Audit = audit
+			st, _ := mcp.NewInMemoryTransports()
+			err := Serve(t.Context(), cfg, st)
+			if err == nil {
+				t.Fatal("served")
+			}
+			if name != "signed, required, unchecked" && !errors.Is(err, ErrNotVerified) {
+				t.Errorf("not ErrNotVerified: %v", err)
+			}
+			if audit.String() != "" {
+				t.Errorf("the audit log has %q", audit.String())
+			}
+		})
 	}
 }

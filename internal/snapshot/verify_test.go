@@ -4,6 +4,7 @@
 package snapshot
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -172,5 +173,31 @@ func TestFindParentRejectsAMalformedParentID(t *testing.T) {
 		if _, err := FindParent(dir); err == nil || !strings.Contains(err.Error(), "not a snapshot id") {
 			t.Errorf("FindParent with parent_id %q: want an error, got %v", id, err)
 		}
+	}
+}
+
+func TestLoadAndVerifyReturnTheManifestBytesTheyHashed(t *testing.T) {
+	dir := writtenEstate(t)
+	want, err := os.ReadFile(filepath.Join(dir, ManifestFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := Load(dir)
+	if err != nil || !bytes.Equal(l.ManifestRaw, want) {
+		t.Errorf("Load: %v, bytes equal %v", err, err == nil && bytes.Equal(l.ManifestRaw, want))
+	}
+	res, raw := VerifyWithManifest(dir)
+	if !res.OK() || !bytes.Equal(raw, want) {
+		t.Errorf("VerifyWithManifest: %+v", res)
+	}
+	// A folder that does not verify still returns the bytes it read.
+	if err := os.Remove(filepath.Join(dir, EdgesFile)); err != nil {
+		t.Fatal(err)
+	}
+	if res, raw = VerifyWithManifest(dir); res.OK() || !bytes.Equal(raw, want) {
+		t.Errorf("a folder that does not verify: %+v", res)
+	}
+	if res, raw = VerifyWithManifest(filepath.Join(dir, "nothing")); res.OK() || raw != nil {
+		t.Errorf("no folder: %+v", res)
 	}
 }

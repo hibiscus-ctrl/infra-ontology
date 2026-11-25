@@ -4,13 +4,14 @@
 
 ```sh
 infra-ontology serve-mcp <snapshot-dir> [--tools inventory,blast_radius,query,snapshot_info] [--audit-log FILE] [--memory 512MB]
+                          [--key PUBKEY | --certificate-identity ID --certificate-oidc-issuer ISSUER] [--trusted-root FILE] [--require-signature]
 ```
 
 The server opens no port, reads no cloud or backend, takes no credentials and writes no file but the audit log you name. Standard output carries the protocol and nothing else.
 
 ## Start-up
 
-1. **Verify.** The snapshot is checked against its manifest, as `snapshot verify` does. A snapshot that does not verify is not served: the command prints why and exits 4.
+1. **Verify.** The snapshot is checked against its manifest, as `snapshot verify` does. A snapshot that does not verify is not served: the command prints why and exits 4. If the snapshot is signed, the signature is read too (see [signing](signing.md)): given `--key`, or `--certificate-identity` and `--certificate-oidc-issuer`, the server checks it and refuses to start on a signature that does not check; `--require-signature` also refuses a snapshot with no signature that verified. A signature file that is not a Sigstore bundle is refused too.
 2. **Open one locked session.** The tables are loaded into a private database file that is attached read-only, then the file is deleted and the session is locked, as [the query page](query.md#what-the-session-guarantees) describes. The engine itself refuses every write, and no file can be read, no extension loaded and no setting changed. One session serves every call.
 3. **Serve** until the client closes the connection.
 
@@ -27,9 +28,11 @@ All four are annotated read-only, idempotent, not destructive and closed-world. 
 | `inventory` | `type` (Terraform or inventory type), `account`, `environment`, `module` (that path and the modules in it), `address_prefix`, `limit` (1 to 1000, default 100), `offset` | A page of nodes in a fixed order, and `next_offset` when more follow. It runs the stored query `inventory` |
 | `blast_radius` | `target` (a node id, Terraform address, ARN or path, or cloud id), `max_depth` (1 to 10, default 5), `limit` (1 to 1000, default 200) | `status`: `resolved`, `ambiguous` or `not_found`; the `targets`; the `dependents` with their depth; counts by type and by account; the depth reached. It runs the stored query `blast`. A target that matches several nodes (the same address in two accounts) returns them as candidates with no dependents: call again with a node id |
 | `query` | `sql`, or `stored` and `params`; `limit` (1 to 1000, default 100) | The rows of one read-only query, under the same dialect check and caps as `infra-ontology query` |
-| `snapshot_info` | none | The snapshot's id, label, parent, age, status, tables, sources, coverage, failed sources, redaction and limits; the stored queries and their parameters; the caps and the tools that are on |
+| `snapshot_info` | none | The snapshot's id, label, parent, age, status, signature status, tables, sources, coverage, failed sources, redaction and limits; the stored queries and their parameters; the caps and the tools that are on |
 
 The citation of `blast_radius` shows a row cap one above `limit`: the target's own row is counted. A bad argument (a limit out of range, an empty target, a query the dialect refuses) is an error result with the reason, so the agent can correct it. The result is capped at 256 KiB of JSON and the time at 10 seconds; a cap that cuts a result says so in `answer.truncated` and `answer.truncated_by`.
+
+`snapshot_info` reports the signature as `signature`: `status` is `unsigned` (no `manifest.sig.json`), `signed_unverified` (there is a bundle and the server was started with nothing to check it with) or `verified` (it checked against the `--key` or identity the server was started with; `mode` is `key` or `keyless` and `signer` names the key's SHA-256 or the certificate's identity and issuer). The status is read once, at start-up. A verified signature says who signed the manifest, not that the snapshot is complete: read `status` and `limits` too.
 
 ## Which tools are on
 

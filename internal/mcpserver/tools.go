@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hibiscus-ctrl/infra-ontology/internal/query"
+	"github.com/hibiscus-ctrl/infra-ontology/internal/signing"
 	"github.com/hibiscus-ctrl/infra-ontology/internal/snapshot"
 )
 
@@ -224,6 +225,12 @@ type InfoOut struct {
 	CreatedAt  string `json:"created_at"`
 	Status     string `json:"status"`
 	Tool       string `json:"tool"`
+	// Signature is the snapshot's signature: unsigned, signed_unverified
+	// (there is a Sigstore bundle and the server was given nothing to check it
+	// with) or verified (it checked against the key or identity the server was
+	// started with, which Signer names). A signature that does not check, or is
+	// no bundle, stops the server, so it is never reported here.
+	Signature signing.Status `json:"signature"`
 	// Tables are the tables a query may read, with their row counts.
 	Tables    map[string]int          `json:"tables"`
 	Sources   snapshot.SourcesSummary `json:"sources"`
@@ -281,7 +288,7 @@ func (s *server) info(ctx context.Context, _ InfoIn) (InfoOut, ran, error) {
 	}
 	res := InfoOut{
 		SnapshotID: m.SnapshotID, Label: m.Label, ParentID: m.ParentID, CreatedAt: m.CreatedAt, Status: m.Status,
-		Tool: m.Tool.Name + " " + m.Tool.Version, Tables: map[string]int{}, Sources: m.SourcesSummary, Coverage: m.Coverage,
+		Tool: m.Tool.Name + " " + m.Tool.Version, Signature: s.sig, Tables: map[string]int{}, Sources: m.SourcesSummary, Coverage: m.Coverage,
 		Redaction: m.Redaction, Limits: m.Limits, Dialect: query.Dialect, Tools: s.enabled, Answer: out.Answer,
 		Caps: InfoCaps{
 			DefaultRows: defaultQueryRows, MaxRows: maxRows, MaxBytes: s.cfg.MaxBytes,
