@@ -20,7 +20,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/IgnatG/infraharvest/pkg/secretscan"
 	"github.com/IgnatG/infraharvest/pkg/tfstate"
 	"github.com/IgnatG/infraharvest/pkg/typemap"
 
@@ -286,8 +285,9 @@ func (b *builder) instanceNode(s *docState, in tfstate.Instance) snapshot.Node {
 	switch {
 	case isGenerated(in):
 		id, arn = "", ""
-	case secretscan.CredentialFormat(id) != "" || secretscan.CredentialFormat(arn) != "":
-		// An ID that is a credential is never written down.
+	case Scrub(id) != id || Scrub(arn) != arn:
+		// An ID that is, or holds, a credential (a token, or a URL with a
+		// user, a password or a query string) is never written down.
 		id, arn = "", ""
 		b.noID++
 	}
@@ -317,11 +317,13 @@ func (b *builder) instanceNode(s *docState, in tfstate.Instance) snapshot.Node {
 // isGenerated reports whether an instance's ID is a value Terraform makes up
 // and may be used as a secret (random_string's id is its result), and not an
 // identifier of a thing in a cloud.
+// Providers whose IDs are free text are left out too: http (the URL it read),
+// external (whatever the program printed), local, null, time, archive and tls.
 func isGenerated(in tfstate.Instance) bool {
 	if in.Mode == "data" && in.Type == "terraform_remote_state" {
 		return true
 	}
-	return providerName(in.Provider) == "random" || strings.HasPrefix(in.Type, "random_")
+	return freeTextProviders[providerName(in.Provider)] || strings.HasPrefix(in.Type, "random_")
 }
 
 func providerName(provider string) string {
@@ -500,4 +502,11 @@ func digest(d tfstate.Document) string {
 		w("remote", r.Address, r.Backend, r.Account, r.Bucket, r.Key, r.Host, r.Organization, r.Workspace)
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// freeTextProviders are the providers whose IDs are made up by Terraform or
+// are free text, never the identifier of a thing in a cloud.
+var freeTextProviders = map[string]bool{
+	"random": true, "http": true, "external": true, "local": true,
+	"null": true, "time": true, "archive": true, "tls": true,
 }

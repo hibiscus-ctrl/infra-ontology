@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/IgnatG/infraharvest/pkg/tfstate"
+	"github.com/IgnatG/infraharvest/pkg/typemap"
 
 	"github.com/hibiscus-ctrl/infra-ontology/internal/snapshot"
 )
@@ -489,5 +490,31 @@ func TestCredentialIDsAreNotKept(t *testing.T) {
 	n := nodeAt(t, res.Tables, "s3://b/k.tfstate", "aws_iam_access_key.ci")
 	if n.NativeID != "" || !strings.Contains(res.Limits, "looks like a credential") {
 		t.Errorf("node %+v, limits %s", n, res.Limits)
+	}
+}
+
+func TestIDsThatHoldSecretsOrFreeTextAreNotKept(t *testing.T) {
+	tm, err := typemap.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &builder{tm: tm}
+	s := &docState{loc: "state.tfstate", source: "src"}
+	token := "ghp_" + strings.Repeat("a1B2", 9)
+	for _, in := range []tfstate.Instance{
+		{Mode: "data", Type: "http", Provider: `provider["registry.terraform.io/hashicorp/http"]`, Address: "data.http.x", ID: "https://api.example.com/v1?token=abc"},
+		{Mode: "data", Type: "external", Provider: `provider["registry.terraform.io/hashicorp/external"]`, Address: "data.external.x", ID: "anything the program printed"},
+		{Mode: "managed", Type: "aws_s3_object", Provider: `provider["registry.terraform.io/hashicorp/aws"]`, Address: "aws_s3_object.a", ID: "https://user:pass@example.com/x"},
+		{Mode: "managed", Type: "aws_s3_object", Provider: `provider["registry.terraform.io/hashicorp/aws"]`, Address: "aws_s3_object.b", ID: "prefix " + token},
+	} {
+		n := b.instanceNode(s, in)
+		if n.NativeID != "" || n.ARNOrPath != "" {
+			t.Errorf("%s keeps an id: %q %q", in.Address, n.NativeID, n.ARNOrPath)
+		}
+	}
+	// An ordinary URL ID with nothing secret in it is kept.
+	in := tfstate.Instance{Mode: "managed", Type: "google_storage_bucket", Provider: `provider["registry.terraform.io/hashicorp/google"]`, Address: "google_storage_bucket.a", ID: "https://www.googleapis.com/storage/v1/b/a"}
+	if n := b.instanceNode(s, in); n.NativeID == "" {
+		t.Errorf("a plain URL id was dropped: %+v", n)
 	}
 }
