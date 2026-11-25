@@ -70,6 +70,14 @@ func credentialLike(s string) bool {
 	return secretscan.CredentialFormat(s) != "" || Scrub(s) != strings.Join(strings.Fields(s), " ")
 }
 
+// clearCredential returns s, or "" when it looks like a credential.
+func clearCredential(s string) string {
+	if credentialLike(s) {
+		return ""
+	}
+	return s
+}
+
 // invResource is a resource of an inventory, normalised and with the source
 // that listed it.
 type invResource struct {
@@ -108,7 +116,7 @@ func (b *builder) openInventories(reads []InventoryRead) []*invResource {
 			continue
 		}
 		inv := r.Inv
-		src.DocumentSHA256, src.Collector, src.CollectorVersion = inv.Digest, firstOf(inv.Tool, src.Collector), firstOf(inv.ToolVersion, src.CollectorVersion)
+		src.DocumentSHA256, src.Collector, src.CollectorVersion = inv.Digest, firstOf(clearCredential(inv.Tool), src.Collector), firstOf(clearCredential(inv.ToolVersion), src.CollectorVersion)
 		if !inv.GeneratedAt.IsZero() {
 			src.CollectedAt = inv.GeneratedAt.UTC().Format(time.RFC3339)
 		}
@@ -139,11 +147,13 @@ func (b *builder) openInventories(reads []InventoryRead) []*invResource {
 // left out if its ID is a credential, its name and address are dropped if they
 // are, and its tags go through the secret detectors.
 func (b *builder) mergeResource(merged map[invKey]*invResource, inv Inventory, source string, res Resource) {
-	if credentialLike(res.ID) || credentialLike(res.CloudID) {
+	// An ID or a type that is a credential leaves the resource out: without
+	// them it cannot be placed.
+	if credentialLike(res.ID) || credentialLike(res.CloudID) || credentialLike(res.Type) {
 		b.credentialIDs++
 		return
 	}
-	for _, p := range []*string{&res.Name, &res.Address, &res.Module, &res.Root} {
+	for _, p := range []*string{&res.Name, &res.Address, &res.Module, &res.Root, &res.Account, &res.Region} {
 		if credentialLike(*p) {
 			*p = ""
 		}

@@ -487,7 +487,7 @@ func TestPlantedSecretsInAnInventoryAreNotKept(t *testing.T) {
 	pw := "https://deploy:PLANTED-URL-PASSWORD@example.com/x"
 	q := "https://example.com/hook?token=PLANTED-QUERY-TOKEN"
 	v1 := `{"schema":"infraharvest/inventory/v1","run_id":"3f1c0b6e-8a52-4d3e-9f10-2c6a7d1e5b44","generated_at":"2026-11-25T09:30:00Z",
-	 "tool":{"name":"infraharvest","version":"0.9.0"},"cloud":"aws","scopes":["aws/111111111111/eu-west-1"],
+	 "tool":{"name":"infraharvest","version":"` + token + `"},"cloud":"aws","scopes":["aws/111111111111/eu-west-1"],
 	 "attributes":{"password":"PLANTED-ATTRIBUTE-1"},
 	 "resources":[
 	  {"type":"aws_ssm_parameter","id":"` + token + `","account":"111111111111","status":"unmanaged","status_basis":"none"},
@@ -496,6 +496,8 @@ func TestPlantedSecretsInAnInventoryAreNotKept(t *testing.T) {
 	  {"type":"aws_instance","id":"i-0aa1","account":"111111111111","status":"unmanaged","status_basis":"none","name":"` + token + `",
 	   "attributes":{"user_data":"PLANTED-ATTRIBUTE-2"},"values":{"secret":"PLANTED-ATTRIBUTE-3"},
 	   "tags":{"Name":"web","api_key":"PLANTED-TAG-KEY-VALUE","deploy":"` + token + `","build":"` + pw + `","session":"A9f3Qz7LmN2xW8vB5kRt1YpD6sHc4EuJ","env":"prod"}},
+	  {"type":"aws_instance","id":"i-0aa3","account":"` + token + `","region":"` + pw + `","status":"unmanaged","status_basis":"none"},
+	  {"type":"` + token + `","id":"i-0aa4","account":"111111111111","status":"unmanaged","status_basis":"none"},
 	  {"type":"aws_instance","id":"i-0aa2","account":"111111111111","status":"managed","status_basis":"state","name":"web 2","tags":{"` + token + `":"x","secret_key":"PLANTED-TAG-KEY-2"}}],
 	 "redaction":{"tag_keys_dropped":["` + token + `"],"ids_hashed":false,"hash_alg":"hmac-sha256"},"coverage":{"totals":{"failed":0}}}`
 	ocsf := `{"schema":"infraharvest/ocsf-inventory/v1","run_id":"3f1c0b6e-8a52-4d3e-9f10-2c6a7d1e5b44","ocsf_version":"1.9.0",
@@ -542,8 +544,15 @@ func TestPlantedSecretsInAnInventoryAreNotKept(t *testing.T) {
 			}
 		}
 	}
-	if !strings.Contains(res.Limits, "3 inventory resources have an ID that looks like a credential and are left out") {
+	if !strings.Contains(res.Limits, "4 inventory resources have an ID that looks like a credential and are left out") {
 		t.Errorf("limits: %s", res.Limits)
+	}
+	// An account or a region that is a credential is dropped; the node stays.
+	if n, ok := byID["i-0aa3"]; !ok || n.Account != "" || n.Region != "" {
+		t.Errorf("i-0aa3: %v %+v", ok, n)
+	}
+	if _, ok := byID["i-0aa4"]; ok {
+		t.Errorf("a resource whose type is a credential is in the snapshot")
 	}
 	// What is not a secret stays: the resource, its name and its tags.
 	i1 := byID["i-0aa1"]
