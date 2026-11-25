@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/hibiscus-ctrl/infra-ontology/internal/snapshot"
 	"github.com/hibiscus-ctrl/infra-ontology/internal/version"
@@ -179,10 +180,14 @@ func short(id string) string { return printable(id[:min(12, len(id))]) }
 // printable escapes control characters, so a value read from a snapshot
 // cannot move the cursor, recolour or rewrite the terminal it is printed to.
 func printable(s string) string {
-	if !strings.ContainsFunc(s, unicode.IsControl) {
+	// Decide on the bytes as well as the runes: an invalid byte such as a
+	// lone 0x9b decodes to U+FFFD, yet some terminals read it as an escape.
+	if utf8.ValidString(s) && !strings.ContainsFunc(s, func(r rune) bool {
+		return unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
+	}) {
 		return s
 	}
-	q := strconv.Quote(s)
+	q := strconv.QuoteToGraphic(s)
 	return q[1 : len(q)-1]
 }
 

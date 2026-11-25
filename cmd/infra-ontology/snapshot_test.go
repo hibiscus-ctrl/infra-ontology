@@ -221,6 +221,8 @@ func TestPrintableEscapesControlCharacters(t *testing.T) {
 		"red\x1b[31mtext":       `red\x1b[31mtext`,
 		"two\nlines":            `two\nlines`,
 		"bell\a and \"quotes\"": `bell\a and \"quotes\"`,
+		"lone \x9b[2J byte":     `lone \x9b[2J byte`,
+		"right\u202eto left":    `right\u202eto left`,
 	} {
 		if got := printable(in); got != want {
 			t.Errorf("printable(%q) = %q, want %q", in, got, want)
