@@ -26,9 +26,13 @@ See [docs/architecture.md](docs/architecture.md) for how the parts fit together.
 - It uses your own credentials, from your environment, and never prints, stores or sends them.
 - No network calls except to the backends you name. No telemetry.
 
+## Install
+
+Download an archive from the [releases page](https://github.com/hibiscus-ctrl/infra-ontology/releases) and [check its signature](docs/install.md#check-the-download). There is nothing else to install on macOS and Windows. The full build, with the query engine (`query`, `verify --answer` and `serve-mcp`), is released for Linux (amd64, arm64), macOS (Intel, Apple silicon) and Windows (amd64). On Linux it links `libstdc++` at run time, so it needs a glibc distribution with libstdc++ installed. Every other platform, and images without glibc and libstdc++, get a smaller pure-Go `_noquery` archive that has no query engine. [docs/install.md](docs/install.md) says which archive to pick.
+
 ## Build
 
-You need Go (the version in `go.mod`) and, for the query engine, cgo: a C and C++ compiler (`gcc` and `g++`, or the Xcode command line tools). `go build -tags noduckdb` builds without the engine, in pure Go; `query` then says so. A build with DuckDB is about 77 MB and links `libstdc++` at run time, so on Linux it needs a glibc distribution with libstdc++ installed.
+You need Go (the version in `go.mod`) and, for the query engine, cgo: a C and C++ compiler (`gcc` and `g++`, or the Xcode command line tools; Windows builds without the engine for now). `go build -tags noduckdb` builds without the engine, in pure Go; `query` then says so. A build with DuckDB is about 77 MB and links `libstdc++` at run time, so on Linux it needs a glibc distribution with libstdc++ installed.
 
 ```sh
 make build        # builds ./infra-ontology

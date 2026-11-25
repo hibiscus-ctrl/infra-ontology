@@ -1,0 +1,190 @@
+# Copyright 2026 Gabriel Ignat
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: Build release binaries
+
+# Builds the release archives and their checksums, and uploads them as the
+# `dist` artifact. It publishes nothing: release.yml (on a version tag) and
+# release-check.yml (on a pull request, as a trial run) call it.
+#
+# The query engine is DuckDB, which needs cgo. cgo does not cross-compile
+# cleanly, so each platform the engine ships prebuilt libraries for is built on
+# a runner of its own platform. Every other platform gets a pure-Go build with
+# `-tags noduckdb`, named `_noquery`, from one Linux runner.
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: A version tag such as v1.2.3, or snapshot for a trial build
+        required: true
+        type: string
+    outputs:
+      version:
+        description: The version without the leading v
+        value: ${{ jobs.meta.outputs.version }}
+
+permissions:
+  contents: read
+
+jobs:
+  meta:
+    name: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Work out the version
+        id: version
+        env:
+          INPUT: ${{ inputs.version }}
+        run: |
+          if [ "$INPUT" = snapshot ]; then
+            version="0.0.0-snapshot.${GITHUB_SHA::7}"
+          elif [[ "$INPUT" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            version=${INPUT#v}
+          else
+            echo "not a version tag: $INPUT" >&2
+            exit 1
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+  build:
+    name: build with the query engine (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: meta
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, goos: linux, goarch: amd64 }
+          - { os: ubuntu-24.04-arm, goos: linux, goarch: arm64 }
+          - { os: macos-15-intel, goos: darwin, goarch: amd64 }
+          - { os: macos-latest, goos: darwin, goarch: arm64 }
+    env:
+      CGO_ENABLED: "1"
+      VERSION: ${{ needs.meta.outputs.version }}
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build
+        run: |
+          ext=
+          [ "$GOOS" = windows ] && ext=.exe
+          out="out/bin-$GOOS-$GOARCH"
+          mkdir -p "$out"
+          go build -trimpath \
+            -ldflags "-s -w -X github.com/hibiscus-ctrl/infra-ontology/internal/version.Version=v$VERSION" \
+            -o "$out/infra-ontology$ext" ./cmd/infra-ontology
+          ls -l "$out"
+      - name: Run the binary
+        run: |
+          ext=
+          [ "$GOOS" = windows ] && ext=.exe
+          scripts/smoke-release.sh "out/bin-$GOOS-$GOARCH/infra-ontology$ext" query "v$VERSION"
+      - name: Check the libraries the binary links
+        if: runner.os == 'Linux'
+        run: scripts/check-ldd.sh "out/bin-$GOOS-$GOARCH/infra-ontology"
+      - name: Upload the binary
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bins-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: out
+          if-no-files-found: error
+          retention-days: 7
+
+  build-noquery:
+    name: build without the query engine (noduckdb)
+    needs: meta
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CGO_ENABLED: "0"
+      VERSION: ${{ needs.meta.outputs.version }}
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build for every platform in pure Go
+        run: |
+          # Every platform the engine has no prebuilt library for (the 32-bit,
+          # RISC-V, IBM and BSD ones, Windows on Arm), and Linux on amd64 and
+          # arm64 for images without glibc and libstdc++ (Alpine, distroless
+          # static, scratch).
+          targets="linux/amd64 linux/arm64 linux/386 linux/arm linux/riscv64 linux/ppc64le linux/s390x linux/loong64
+                   freebsd/amd64 freebsd/arm64 openbsd/amd64 netbsd/amd64 windows/amd64 windows/arm64"
+          for target in $targets; do
+            goos=${target%/*}
+            goarch=${target#*/}
+            ext=
+            [ "$goos" = windows ] && ext=.exe
+            echo "$target"
+            GOOS=$goos GOARCH=$goarch go build -trimpath -tags noduckdb \
+              -ldflags "-s -w -X github.com/hibiscus-ctrl/infra-ontology/internal/version.Version=v$VERSION" \
+              -o "out/bin-$goos-$goarch-noquery/infra-ontology$ext" ./cmd/infra-ontology
+          done
+      - name: Run the binary
+        run: scripts/smoke-release.sh out/bin-linux-amd64-noquery/infra-ontology noquery "v$VERSION"
+      - name: Check the binary links no engine
+        run: |
+          # Look at the linked modules only: the build settings name the noduckdb tag.
+          if go version -m out/bin-linux-amd64-noquery/infra-ontology | awk '$1 == "dep" {print $2}' | grep -iE 'duckdb|apache/arrow'; then
+            echo "a noquery binary depends on the engine" >&2
+            exit 1
+          fi
+      - name: Upload the binaries
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bins-noquery
+          path: out
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    name: archives and checksums
+    needs: [meta, build, build-noquery]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download the binaries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: bins-*
+          merge-multiple: true
+          path: bins
+      - name: Make the archives and the checksums
+        run: scripts/package-release.sh "$VERSION" bins dist
+      - name: Check the checksums
+        run: cd dist && sha256sum --check --strict "infra-ontology_${VERSION}_SHA256SUMS"
+      - name: Upload the archives
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 7

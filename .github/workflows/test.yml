@@ -31,7 +31,7 @@ jobs:
       fail-fast: false
       matrix:
         # linux/amd64, linux/arm64 and macOS on Apple silicon: the engine ships
-        # prebuilt libraries for all of them. Windows is not built in v0.
+        # prebuilt libraries for all of them. Windows is built, and run, by the release workflow.
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     env:
       CGO_ENABLED: "1"

@@ -1,0 +1,8 @@
+# Copyright 2026 Gabriel Ignat
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Runner labels GitHub provides that the installed actionlint does not know yet
+# (https://github.com/actions/runner-images#available-images).
+self-hosted-runner:
+  labels:
+    - macos-15-intel
