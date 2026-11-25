@@ -1,6 +1,6 @@
 # Architecture
 
-This is a short summary of how infra-ontology is meant to work. The snapshot (its format, writer, verify and diff) and the query layer are written; ingest and the MCP server are still the plan, and each says so. The details will move into their own pages as the parts land.
+This is a short summary of how infra-ontology is meant to work. The snapshot (its format, writer, verify and diff) and the query layer are written; the MCP server is written too; ingest is still the plan, and says so. The details will move into their own pages as the parts land.
 
 ## The idea
 
@@ -60,7 +60,7 @@ Every answer carries a citation: the canonical query and its hash, the stored qu
 
 ## MCP tools
 
-A stdio server opens one snapshot and never writes, never connects to a cloud and takes no credentials. Four tools, all marked read-only: `inventory`, `blast_radius`, `query` and `snapshot_info`. A policy file can limit accounts, types and row counts.
+`serve-mcp` is a stdio server. It verifies a snapshot, opens one locked session over it (tables attached read-only) and never writes, never connects to a cloud and takes no credentials. Four tools, all marked read-only: `inventory`, `blast_radius`, `query` and `snapshot_info`. `--tools` turns on a subset, and an append-only audit log records each call as hashes and counts, never rows. See [mcp.md](mcp.md) and [SKILL.md](../SKILL.md).
 
 ## Red lines
 

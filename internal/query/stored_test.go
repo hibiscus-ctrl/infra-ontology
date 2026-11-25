@@ -35,7 +35,7 @@ func TestStoredQueriesLoad(t *testing.T) {
 			t.Errorf("%s: renders to %q, %v, %v", s.Name, text, used, err)
 		}
 	}
-	for _, want := range []string{"blast", "cone", "unmanaged", "summary"} {
+	for _, want := range []string{"blast", "cone", "unmanaged", "summary", "inventory"} {
 		if !names[want] {
 			t.Errorf("no stored query %q", want)
 		}
