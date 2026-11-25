@@ -43,3 +43,17 @@ func TestVerifyAnswerWithoutTheEngine(t *testing.T) {
 		t.Errorf("exit %d: %s", code, errb.String())
 	}
 }
+
+// serve-mcp needs the engine: the build without it says so and serves nothing.
+func TestServeMCPWithoutTheEngine(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := run([]string{"serve-mcp", estate}, &out, &errb)
+	if code != 1 || out.Len() != 0 {
+		t.Fatalf("exit %d, stdout %q", code, out.String())
+	}
+	for _, want := range []string{"serve-mcp: unavailable", "query engine not built in (noduckdb build)", "without the noduckdb tag"} {
+		if !strings.Contains(errb.String(), want) {
+			t.Errorf("stderr lacks %q:\n%s", want, errb.String())
+		}
+	}
+}

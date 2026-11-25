@@ -35,6 +35,9 @@ commands:
                                       re-run a cited answer against its snapshot
   diff [--json] <a> [<b>]             what changed from snapshot a to snapshot b
                                       (b defaults to a's parent: what changed in a)
+  serve-mcp <dir> [--tools LIST] [--audit-log FILE]
+                                      an MCP server on stdio over a verified snapshot:
+                                      inventory, blast_radius, query, snapshot_info
   snapshot build --from-json FILE     build a snapshot from a JSON file (for tests
                                       and development; state and inventory readers
                                       come later)
@@ -62,6 +65,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runQuery(args[1:], stdout, stderr)
 	case "verify":
 		return runVerifyTop(args[1:], stdout, stderr)
+	case "serve-mcp":
+		return runServeMCP(args[1:], stdout, stderr)
 	case "help", "--help", "-h":
 		fmt.Fprint(stdout, usage)
 		return exitOK
