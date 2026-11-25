@@ -28,3 +28,4 @@ These hold for every change. A change that breaks one doesn't merge.
 - Every Go file starts with the two-line copyright and SPDX licence header shown in CONTRIBUTING.md; `reuse lint` checks it.
 - Pin every GitHub Action by full SHA with a version comment; workflows default to `permissions: contents: read`.
 - Keep command output short.
+- State stores are optional: `internal/ingest` reads state through infraharvest's `pkg/tfstate`, and each cloud store is behind a build tag (`s3`, `gcs`, `azblob`, `hcp`) in a file of its own. The default build links no cloud SDK (CI checks `go list -deps`); release builds use all four tags.

@@ -4,6 +4,9 @@
 # Run `make help` for the targets. PKG narrows go test, go vet and the linter
 # to some packages, for example `make test PKG=./cmd/...`.
 PKG ?= ./...
+# TAGS adds build tags, for example TAGS=s3,gcs,azblob,hcp for the state stores
+# or TAGS=noduckdb for the pure-Go build.
+TAGS ?=
 GOLANGCI_LINT_VERSION := v2.15.0
 
 .PHONY: help build test vet lint fmt fast
@@ -12,11 +15,11 @@ GOLANGCI_LINT_VERSION := v2.15.0
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-8s %s\n", $$1, $$2}'
 
-build: ## Build the command into ./infra-ontology
-	go build -o infra-ontology ./cmd/infra-ontology
+build: ## Build the command into ./infra-ontology (TAGS adds build tags)
+	go build $(if $(TAGS),-tags $(TAGS)) -o infra-ontology ./cmd/infra-ontology
 
 test: ## go test with the race detector on PKG
-	CGO_ENABLED=1 go test -race $(PKG)
+	CGO_ENABLED=1 go test -race $(if $(TAGS),-tags $(TAGS)) $(PKG)
 
 vet: ## go vet on PKG
 	go vet $(PKG)

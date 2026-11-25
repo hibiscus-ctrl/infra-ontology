@@ -5,11 +5,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,6 +19,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/hibiscus-ctrl/infra-ontology/internal/ingest"
 	"github.com/hibiscus-ctrl/infra-ontology/internal/snapshot"
 	"github.com/hibiscus-ctrl/infra-ontology/internal/version"
 )
@@ -234,11 +237,19 @@ type estateFile struct {
 	Sources   []snapshot.Source   `json:"sources"`
 }
 
-// runBuild is `snapshot build --from-json`: a test and development path that
-// writes a snapshot from a JSON file. The readers of state and inventory that
-// replace it come later.
+// stateFlags is a flag that may be given more than once.
+type stateFlags []string
+
+func (f *stateFlags) String() string     { return strings.Join(*f, ", ") }
+func (f *stateFlags) Set(v string) error { *f = append(*f, v); return nil }
+
+// runBuild is `snapshot build`: from the Terraform state in one or more
+// backends (--state), or, as a test and development path, from a JSON file of
+// rows (--from-json).
 func runBuild(args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("snapshot build", stderr)
+	var states stateFlags
+	fs.Var(&states, "state", "a Terraform state to read: a path, s3://bucket/prefix, gs://bucket/prefix, azblob://account/container/prefix or hcp://organization/workspace (repeat for more)")
 	from := fs.String("from-json", "", "the JSON file of nodes, edges and sources to build from (test and development path)")
 	out := fs.String("out", filepath.Join(".infra-ontology", "snapshots"), "the folder to write the snapshot folder into")
 	label := fs.String("label", "", "a name for the snapshot (overrides the file's)")
@@ -247,39 +258,55 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 	if _, ok := parse(fs, args, 0, 0, stderr); !ok {
 		return exitUsage
 	}
-	if *from == "" {
-		fmt.Fprintln(stderr, "infra-ontology snapshot build: --from-json FILE is required (reading state and inventory comes later)")
+	switch {
+	case *from != "" && len(states) > 0:
+		fmt.Fprintln(stderr, "infra-ontology snapshot build: give --state or --from-json, not both")
+		return exitUsage
+	case *from == "" && len(states) == 0:
+		fmt.Fprintln(stderr, "infra-ontology snapshot build: --state LOCATION is required (or --from-json FILE, for tests)")
 		return exitUsage
 	}
-	raw, err := os.ReadFile(*from)
-	if err != nil {
-		fmt.Fprintf(stderr, "infra-ontology snapshot build: %v\n", err)
-		return exitFailed
-	}
-	var est estateFile
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&est); err != nil {
-		fmt.Fprintf(stderr, "infra-ontology snapshot build: %s: %v\n", *from, err)
-		return exitFailed
-	}
-	opts := snapshot.BuildOptions{
-		ParentID: first(*parent, est.ParentID),
-		Label:    first(*label, est.Label),
-		Limits:   est.Limits,
-		Tool:     snapshot.Tool{Name: "infra-ontology", Version: version.Version},
-	}
-	if est.Redaction != nil {
-		opts.Redaction = *est.Redaction
-	}
+	var (
+		tables snapshot.Tables
+		opts   = snapshot.BuildOptions{
+			ParentID: *parent, Label: *label,
+			Tool: snapshot.Tool{Name: "infra-ontology", Version: version.Version},
+		}
+		code int
+	)
 	opts.CreatedAt = time.Now()
-	if at := first(*created, est.CreatedAt); at != "" {
-		if opts.CreatedAt, err = time.Parse(time.RFC3339, at); err != nil {
+	if *created != "" {
+		var err error
+		if opts.CreatedAt, err = time.Parse(time.RFC3339, *created); err != nil {
 			fmt.Fprintf(stderr, "infra-ontology snapshot build: created_at: %v\n", err)
 			return exitUsage
 		}
 	}
-	s, err := snapshot.Build(snapshot.Tables{Nodes: est.Nodes, Edges: est.Edges, Sources: est.Sources}, opts)
+	if *from != "" {
+		var est estateFile
+		if rc := readEstate(*from, &est, stderr); rc != exitOK {
+			return rc
+		}
+		opts.ParentID, opts.Label, opts.Limits = first(*parent, est.ParentID), first(*label, est.Label), est.Limits
+		if est.Redaction != nil {
+			opts.Redaction = *est.Redaction
+		}
+		if at := first(*created, est.CreatedAt); at != "" {
+			var err error
+			if opts.CreatedAt, err = time.Parse(time.RFC3339, at); err != nil {
+				fmt.Fprintf(stderr, "infra-ontology snapshot build: created_at: %v\n", err)
+				return exitUsage
+			}
+		}
+		tables = snapshot.Tables{Nodes: est.Nodes, Edges: est.Edges, Sources: est.Sources}
+	} else {
+		var res ingest.Result
+		if res, code = readStates(states, opts.CreatedAt, stderr); code != exitOK && code != exitPartial {
+			return code
+		}
+		tables, opts.Limits = res.Tables, res.Limits
+	}
+	s, err := snapshot.Build(tables, opts)
 	if err != nil {
 		fmt.Fprintf(stderr, "infra-ontology snapshot build: %v\n", err)
 		return exitFailed
@@ -290,5 +317,56 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 		return exitFailed
 	}
 	fmt.Fprintf(stdout, "%s\nsnapshot %s\n", dir, s.Manifest.SnapshotID)
+	return code
+}
+
+// readEstate decodes the JSON file of rows.
+func readEstate(file string, est *estateFile, stderr io.Writer) int {
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		fmt.Fprintf(stderr, "infra-ontology snapshot build: %v\n", err)
+		return exitFailed
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(est); err != nil {
+		fmt.Fprintf(stderr, "infra-ontology snapshot build: %s: %v\n", file, err)
+		return exitFailed
+	}
 	return exitOK
 }
+
+// readStates reads the states the user named. It returns exitUsage for a
+// location this build cannot read, exitFailed if none could be read and
+// exitPartial if some could not: the snapshot then says which.
+func readStates(locations []string, at time.Time, stderr io.Writer) (ingest.Result, int) {
+	resolved := make([]string, 0, len(locations))
+	for _, l := range locations {
+		r, err := ingest.Resolve(l)
+		if err == nil {
+			err = ingest.Check(r)
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "infra-ontology snapshot build: %v\n", cleanErr(err))
+			return ingest.Result{}, exitUsage
+		}
+		resolved = append(resolved, r)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	res, err := ingest.Build(ingest.ReadAll(ctx, resolved, ingest.Stores()), ingest.Options{
+		CollectedAt: at, Collector: "infra-ontology", CollectorVersion: version.Version,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "infra-ontology snapshot build: %v\n", err)
+		return ingest.Result{}, exitFailed
+	}
+	if res.Failed > 0 {
+		fmt.Fprintf(stderr, "infra-ontology snapshot build: %d of %d states could not be read; the snapshot is partial and lists them\n", res.Failed, len(resolved))
+		return res, exitPartial
+	}
+	return res, exitOK
+}
+
+// cleanErr removes credentials from an error before it is printed.
+func cleanErr(err error) string { return ingest.Scrub(err.Error()) }

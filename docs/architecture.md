@@ -38,13 +38,13 @@ No attribute values are stored. Tags are the one value kept, after the secret de
 
 **Export.** `infra-ontology export graph <dir>` verifies a snapshot and writes the part of it that graph/v1 can hold, for Terragram to draw. It lives in `internal/export`, which imports `internal/snapshot` and not the query engine. See [export.md](export.md).
 
-Until the readers of state and inventory land, `infra-ontology snapshot build --from-json FILE` writes a snapshot from a JSON file of rows. It is a path for tests and development, not for real estates.
+**Build.** `infra-ontology snapshot build --state LOCATION` (repeatable) reads Terraform state with infraharvest's `pkg/tfstate` and writes a snapshot; see [state.md](state.md). `--from-json FILE` writes one from a JSON file of rows, a path for tests and development. The live inventory reader lands later.
 
 Parquet is an open format: anyone can query a snapshot with their own DuckDB.
 
 ## Ingest
 
-- **State.** Read from S3, Google Cloud Storage, Azure Blob Storage, HCP Terraform or a local path. Only identifiers, addresses and dependencies are kept; the parser discards everything else before returning.
+- **State.** Read from S3, Google Cloud Storage, Azure Blob Storage, HCP Terraform or a local path (`internal/ingest`, on infraharvest's `pkg/tfstate`; [state.md](state.md)). Only identifiers, addresses, dependencies and the places `terraform_remote_state` reads from are kept; the parser discards everything else before returning. Each cloud's store is behind a build tag, so the default build links no cloud SDK.
 - **Live inventory.** Read from an export of a live cloud scan. A resource found in both state and inventory becomes one node; one found only in the inventory is marked unmanaged.
 - **Normalise.** One node per real thing, with stable identifiers, de-duplicated edges and secret-looking tags dropped.
 

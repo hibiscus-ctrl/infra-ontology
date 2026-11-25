@@ -63,6 +63,17 @@ jobs:
             echo "the snapshot code imports the query engine" >&2
             exit 1
           fi
+      - name: Check the default build links no cloud SDK
+        run: |
+          if go list -deps ./cmd/infra-ontology | grep -E 'aws-sdk-go|google.golang.org/api|Azure/azure-sdk-for-go|google.golang.org/grpc'; then
+            echo "the default build links a cloud SDK: a store is not behind its build tag" >&2
+            exit 1
+          fi
+      - name: Build, vet and test with every state store
+        run: |
+          go build -tags s3,gcs,azblob,hcp ./...
+          go vet -tags s3,gcs,azblob,hcp ./cmd/... ./internal/ingest/...
+          go test -race -tags s3,gcs,azblob,hcp ./cmd/... ./internal/ingest/...
 
   noduckdb:
     name: go build, vet and test without the engine (noduckdb)
@@ -91,11 +102,27 @@ jobs:
             echo "the noduckdb build depends on the engine" >&2
             exit 1
           fi
+      - name: Check the default build links no cloud SDK
+        run: |
+          if go list -deps -tags noduckdb ./cmd/infra-ontology | grep -E 'aws-sdk-go|google.golang.org/api|Azure/azure-sdk-for-go|google.golang.org/grpc'; then
+            echo "the default build links a cloud SDK: a store is not behind its build tag" >&2
+            exit 1
+          fi
+      - name: Build, vet and test with every state store
+        run: |
+          go build -tags noduckdb,s3,gcs,azblob,hcp ./...
+          go vet -tags noduckdb,s3,gcs,azblob,hcp ./cmd/... ./internal/ingest/...
+          go test -tags noduckdb,s3,gcs,azblob,hcp ./cmd/... ./internal/ingest/...
+          # apache/arrow-go comes with the Azure SDK, not with the engine.
+          if go list -deps -tags noduckdb,s3,gcs,azblob,hcp ./... | grep -i duckdb; then
+            echo "the noduckdb build with the stores depends on the engine" >&2
+            exit 1
+          fi
       - name: Build for every release platform with no C toolchain
         run: |
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
             echo "$target"
-            GOOS="${target%/*}" GOARCH="${target#*/}" go build -tags noduckdb -o /dev/null ./cmd/infra-ontology
+            GOOS="${target%/*}" GOARCH="${target#*/}" go build -tags noduckdb,s3,gcs,azblob,hcp -o /dev/null ./cmd/infra-ontology
           done
 
   names:
