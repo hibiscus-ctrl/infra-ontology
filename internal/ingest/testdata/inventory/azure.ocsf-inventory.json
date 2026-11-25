@@ -1,0 +1,291 @@
+{
+  "schema": "infraharvest/ocsf-inventory/v1",
+  "run_id": "3f1c0b6e-8a52-4d3e-9f10-2c6a7d1e5b44",
+  "ocsf_version": "1.9.0",
+  "redaction": {
+    "tag_keys_dropped": [],
+    "ids_hashed": false,
+    "hash_alg": "hmac-sha256",
+    "addresses_dropped": false
+  },
+  "events": [
+    {
+      "activity_id": 2,
+      "activity_name": "Collect",
+      "category_name": "Discovery",
+      "category_uid": 5,
+      "class_name": "Cloud Resources Inventory Info",
+      "class_uid": 5023,
+      "severity_id": 1,
+      "time": 1795600800000,
+      "type_uid": 502302,
+      "metadata": {
+        "version": "1.9.0",
+        "correlation_uid": "3f1c0b6e-8a52-4d3e-9f10-2c6a7d1e5b44",
+        "product": {
+          "name": "infraharvest",
+          "version": "0.9.0"
+        },
+        "profiles": [
+          "cloud",
+          "iac/iac_source"
+        ],
+        "extensions": [
+          {
+            "name": "iac",
+            "uid": "999",
+            "version": "1.0.0"
+          }
+        ]
+      },
+      "cloud": {
+        "provider": "Azure",
+        "account": {
+          "uid": "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb"
+        },
+        "region": "uksouth"
+      },
+      "resources": [
+        {
+          "type": "azurerm_resource_group",
+          "uid": "/subscriptions/aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb/resourceGroups/Hub-RG",
+          "name": "Hub-RG",
+          "labels": [
+            "status:managed",
+            "status_basis:state",
+            "owner:terraform_state"
+          ],
+          "iac": {
+            "outcome_id": 1,
+            "outcome": "Written",
+            "tool": "terraform",
+            "address": "azurerm_resource_group.hub",
+            "path": "infrastructure/hub"
+          }
+        }
+      ]
+    },
+    {
+      "activity_id": 2,
+      "activity_name": "Collect",
+      "category_name": "Discovery",
+      "category_uid": 5,
+      "class_name": "Cloud Resources Inventory Info",
+      "class_uid": 5023,
+      "severity_id": 1,
+      "time": 1795600800000,
+      "type_uid": 502302,
+      "metadata": {
+        "version": "1.9.0",
+        "correlation_uid": "3f1c0b6e-8a52-4d3e-9f10-2c6a7d1e5b44",
+        "product": {
+          "name": "infraharvest",
+          "version": "0.9.0"
+        },
+        "profiles": [
+          "cloud",
+          "iac/iac_source"
+        ],
+        "extensions": [
+          {
+            "name": "iac",
+            "uid": "999",
+            "version": "1.0.0"
+          }
+        ]
+      },
+      "cloud": {
+        "provider": "Azure",
+        "account": {
+          "uid": "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb"
+        },
+        "region": "uksouth"
+      },
+      "resources": [
+        {
+          "type": "azurerm_virtual_network",
+          "uid": "/subscriptions/aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb/resourceGroups/Hub-RG/providers/Microsoft.Network/virtualNetworks/Hub-VNet",
+          "name": "Hub-VNet",
+          "labels": [
+            "status:managed",
+            "status_basis:state",
+            "owner:terraform_state"
+          ],
+          "tags": [
+            {
+              "name": "env",
+              "value": "prod"
+            }
+          ],
+          "iac": {
+            "outcome_id": 1,
+            "outcome": "Written",
+            "tool": "terraform",
+            "address": "azurerm_virtual_network.hub",
+            "path": "infrastructure/hub"
+          }
+        }
+      ]
+    },
+    {
+      "activity_id": 2,
+      "activity_name": "Collect",
+      "category_name": "Discovery",
+      "category_uid": 5,
+      "class_name": "Cloud Resources Inventory Info",
+      "class_uid": 5023,
+      "severity_id": 1,
+      "time": 1795600800000,
+      "type_uid": 502302,
+      "metadata": {
+        "version": "1.9.0",
+        "correlation_uid": "3f1c0b6e-8a52-4d3e-9f10-2c6a7d1e5b44",
+        "product": {
+          "name": "infraharvest",
+          "version": "0.9.0"
+        },
+        "profiles": [
+          "cloud",
+          "iac/iac_source"
+        ],
+        "extensions": [
+          {
+            "name": "iac",
+            "uid": "999",
+            "version": "1.0.0"
+          }
+        ]
+      },
+      "cloud": {
+        "provider": "Azure",
+        "account": {
+          "uid": "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb"
+        },
+        "region": "uksouth"
+      },
+      "resources": [
+        {
+          "type": "azurerm_subnet",
+          "uid": "/subscriptions/aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb/resourceGroups/Hub-RG/providers/Microsoft.Network/virtualNetworks/Hub-VNet/subnets/snet-a",
+          "name": "snet-a",
+          "labels": [
+            "status:unmanaged",
+            "status_basis:none"
+          ]
+        }
+      ]
+    },
+    {
+      "activity_id": 2,
+      "activity_name": "Collect",
+      "category_name": "Discovery",
+      "category_uid": 5,
+      "class_name": "Cloud Resources Inventory Info",
+      "class_uid": 5023,
+      "severity_id": 1,
+      "time": 1795600800000,
+      "type_uid": 502302,
+      "metadata": {
+        "version": "1.9.0",
+        "correlation_uid": "3f1c0b6e-8a52-4d3e-9f10-2c6a7d1e5b44",
+        "product": {
+          "name": "infraharvest",
+          "version": "0.9.0"
+        },
+        "profiles": [
+          "cloud",
+          "iac/iac_source"
+        ],
+        "extensions": [
+          {
+            "name": "iac",
+            "uid": "999",
+            "version": "1.0.0"
+          }
+        ]
+      },
+      "cloud": {
+        "provider": "Azure",
+        "account": {
+          "uid": "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb"
+        },
+        "region": "uksouth"
+      },
+      "resources": [
+        {
+          "type": "azurerm_storage_account",
+          "uid": "/subscriptions/aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb/resourceGroups/Hub-RG/providers/Microsoft.Storage/storageAccounts/acmehubdiag",
+          "name": "acmehubdiag",
+          "labels": [
+            "status:unmanaged",
+            "status_basis:none"
+          ],
+          "tags": [
+            {
+              "name": "purpose",
+              "value": "diagnostics"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "activity_id": 2,
+      "activity_name": "Collect",
+      "category_name": "Discovery",
+      "category_uid": 5,
+      "class_name": "Cloud Resources Inventory Info",
+      "class_uid": 5023,
+      "severity_id": 1,
+      "time": 1795600800000,
+      "type_uid": 502302,
+      "metadata": {
+        "version": "1.9.0",
+        "correlation_uid": "3f1c0b6e-8a52-4d3e-9f10-2c6a7d1e5b44",
+        "product": {
+          "name": "infraharvest",
+          "version": "0.9.0"
+        },
+        "profiles": [
+          "cloud",
+          "iac/iac_source"
+        ],
+        "extensions": [
+          {
+            "name": "iac",
+            "uid": "999",
+            "version": "1.0.0"
+          }
+        ]
+      },
+      "cloud": {
+        "provider": "AWS",
+        "account": {
+          "uid": "111111111111"
+        },
+        "region": "eu-west-1"
+      },
+      "resources": [
+        {
+          "type": "aws_s3_bucket",
+          "uid": "arn:aws:s3:::acme-logs-audit",
+          "uid_alt": "acme-logs-audit",
+          "name": "acme-logs-audit",
+          "labels": [
+            "status:managed",
+            "status_basis:state",
+            "owner:terraform_state"
+          ],
+          "iac": {
+            "outcome_id": 1,
+            "outcome": "Written",
+            "tool": "terraform",
+            "address": "aws_s3_bucket.logs[\"audit\"]",
+            "path": "infrastructure/net",
+            "state_key": "s3://acme-tfstate/prod/net.tfstate"
+          }
+        }
+      ]
+    }
+  ]
+}

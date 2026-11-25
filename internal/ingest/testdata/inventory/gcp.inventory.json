@@ -1,0 +1,54 @@
+{
+  "schema": "infraharvest/inventory/v1",
+  "run_id": "3f1c0b6e-8a52-4d3e-9f10-2c6a7d1e5b44",
+  "generated_at": "2026-11-25T09:30:00Z",
+  "tool": {
+    "name": "infraharvest",
+    "version": "0.9.0"
+  },
+  "cloud": "google",
+  "scopes": [
+    "google/acme-prod/europe-west2"
+  ],
+  "resources": [
+    {
+      "type": "google_compute_instance",
+      "id": "projects/acme-prod/zones/europe-west2-b/instances/vm",
+      "account": "acme-prod",
+      "status": "unmanaged",
+      "status_basis": "none",
+      "region": "europe-west2",
+      "tags": {
+        "team": "infra"
+      }
+    },
+    {
+      "type": "google_storage_bucket",
+      "id": "acme-prod-assets",
+      "account": "acme-prod",
+      "status": "unmanaged",
+      "status_basis": "none",
+      "region": "europe-west2"
+    }
+  ],
+  "redaction": {
+    "tag_keys_dropped": [],
+    "ids_hashed": false,
+    "hash_alg": "hmac-sha256"
+  },
+  "coverage": {
+    "totals": {
+      "discovered": 2,
+      "imported": 0,
+      "left_out": 0,
+      "skipped": 0,
+      "excluded": 0,
+      "failed": 0,
+      "managed": 0,
+      "other_tool": 0,
+      "cloud": 0
+    },
+    "types": [],
+    "scopes": []
+  }
+}

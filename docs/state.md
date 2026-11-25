@@ -60,7 +60,7 @@ A resource found in more than one state is one node, listed under the first stat
 
 ## What it cannot tell you
 
-The manifest's `limits` says, in plain text: that no live inventory was read, so nothing is marked unmanaged; which states `terraform_remote_state` reads that are not in the snapshot; how many dependencies name an address the state does not hold; how many resources more than one state holds; and how many ids were left out. A resource whose ARN or ID does not carry an account or a region has none.
+The manifest's `limits` says, in plain text: that no live inventory was read, so nothing is marked unmanaged (with [`--inventory`](inventory.md), what it says instead); which states `terraform_remote_state` reads that are not in the snapshot; how many dependencies name an address the state does not hold; how many resources more than one state holds; and how many ids were left out. A resource whose ARN or ID does not carry an account or a region has none.
 
 `document_sha256` of a source is the hash of what the reader kept of the state (see `digest` in `internal/ingest`), not of the state's bytes, which the reader does not keep. It changes whenever anything the snapshot holds changes.
 

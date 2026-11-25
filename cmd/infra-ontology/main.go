@@ -4,9 +4,9 @@
 // Command infra-ontology builds a read-only, cited snapshot of a cloud estate
 // and its Terraform state. It reads Terraform state into a snapshot (from files
 // and, in a build that links the stores, from S3, Cloud Storage, Blob Storage
-// and HCP Terraform), verifies a snapshot, compares two, answers read-only SQL
-// over one and writes one as a graph/v1 document. Reading a live inventory
-// comes later.
+// and HCP Terraform) and the inventories infraharvest exports of a live estate,
+// verifies a snapshot, compares two, answers read-only SQL over one and writes
+// one as a graph/v1 document.
 package main
 
 import (
@@ -44,14 +44,16 @@ commands:
   export graph [-o FILE] [--cloud NAME] <dir>
                                       write a snapshot as an infraharvest graph/v1 document
                                       (lossy) that Terragram can draw
-  snapshot build --state LOCATION [--state LOCATION ...] [--out DIR] [--label TEXT]
+  snapshot build --state LOCATION [--state LOCATION ...] [--inventory FILE ...] [--out DIR] [--label TEXT]
                                       read Terraform state into a snapshot: a path, s3://bucket/prefix,
                                       gs://bucket/prefix, azblob://account/container/prefix or
-                                      hcp://organization/workspace
+                                      hcp://organization/workspace; --inventory adds what is live,
+                                      from an infraharvest inventory/v1 or ocsf-inventory/v1 export
+                                      (--drop-tag KEY, --drop-tags: tags to leave out)
   snapshot build --from-json FILE     build a snapshot from a JSON file (for tests and development)
   version                             print the version
 
-exit codes: 0 ok, 1 failed, 2 usage error, 3 partial snapshot (some state did not read),
+exit codes: 0 ok, 1 failed, 2 usage error, 3 partial snapshot (some state or inventory did not read),
             4 a snapshot or an answer did not verify
 `
 

@@ -1,0 +1,156 @@
+{
+  "schema": "infraharvest/inventory/v1",
+  "run_id": "3f1c0b6e-8a52-4d3e-9f10-2c6a7d1e5b44",
+  "generated_at": "2026-11-25T09:30:00Z",
+  "tool": {
+    "name": "infraharvest",
+    "version": "0.9.0"
+  },
+  "cloud": "aws",
+  "scopes": [
+    "aws/111111111111/eu-west-1"
+  ],
+  "resources": [
+    {
+      "type": "aws_vpc",
+      "id": "vpc-0a1b",
+      "account": "111111111111",
+      "status": "managed",
+      "status_basis": "state",
+      "region": "eu-west-1",
+      "name": "main",
+      "tags": {
+        "env": "prod",
+        "Name": "main"
+      },
+      "owner": "terraform_state"
+    },
+    {
+      "type": "aws_subnet",
+      "id": "subnet-0c20",
+      "account": "111111111111",
+      "status": "managed",
+      "status_basis": "state",
+      "region": "eu-west-1",
+      "owner": "terraform_state"
+    },
+    {
+      "type": "aws_subnet",
+      "id": "subnet-0c21",
+      "account": "111111111111",
+      "status": "unmanaged",
+      "status_basis": "none",
+      "region": "eu-west-1"
+    },
+    {
+      "type": "aws_s3_bucket",
+      "id": "acme-logs-app",
+      "account": "111111111111",
+      "status": "unmanaged",
+      "status_basis": "none",
+      "tags": {
+        "env": "prod",
+        "owner": "platform"
+      }
+    },
+    {
+      "type": "aws_s3_bucket_versioning",
+      "id": "acme-logs-app",
+      "account": "111111111111",
+      "status": "unmanaged",
+      "status_basis": "none"
+    },
+    {
+      "type": "aws_s3_bucket",
+      "id": "acme-orphan",
+      "account": "111111111111",
+      "status": "unmanaged",
+      "status_basis": "none",
+      "tags": {
+        "owner": "unknown"
+      }
+    },
+    {
+      "type": "aws_s3_bucket_versioning",
+      "id": "acme-orphan",
+      "account": "111111111111",
+      "status": "unmanaged",
+      "status_basis": "none"
+    },
+    {
+      "type": "aws_instance",
+      "id": "i-0e3f",
+      "account": "111111111111",
+      "status": "managed",
+      "status_basis": "state",
+      "region": "eu-west-1",
+      "owner": "terraform_state"
+    },
+    {
+      "type": "aws_instance",
+      "id": "i-0f00",
+      "account": "111111111111",
+      "status": "unmanaged",
+      "status_basis": "none",
+      "region": "eu-west-1",
+      "name": "batch",
+      "tags": {
+        "env": "dev",
+        "Owner": "data-team",
+        "db_password": "PLANTED-TAG-VALUE-1"
+      }
+    },
+    {
+      "type": "aws_iam_role",
+      "id": "legacy-admin",
+      "account": "111111111111",
+      "status": "other_iac",
+      "status_basis": "none",
+      "owner": "cloudformation"
+    },
+    {
+      "type": "aws_sqs_queue",
+      "id": "stray",
+      "account": "111111111111",
+      "status": "unmanaged",
+      "status_basis": "none",
+      "region": "eu-west-1"
+    },
+    {
+      "type": "aws_db_instance",
+      "id": "db-OTHER",
+      "account": "111111111111",
+      "status": "unmanaged",
+      "status_basis": "none",
+      "region": "eu-west-1"
+    },
+    {
+      "type": "aws_lb",
+      "id": "arn:aws:elasticloadbalancing:eu-west-1:111111111111:loadbalancer/app/front/50dc6c495c0c9188",
+      "account": "111111111111",
+      "status": "unmanaged",
+      "status_basis": "none",
+      "region": "eu-west-1"
+    }
+  ],
+  "redaction": {
+    "tag_keys_dropped": [],
+    "ids_hashed": false,
+    "hash_alg": "hmac-sha256"
+  },
+  "coverage": {
+    "totals": {
+      "discovered": 13,
+      "imported": 0,
+      "left_out": 0,
+      "skipped": 0,
+      "excluded": 0,
+      "failed": 0,
+      "managed": 0,
+      "other_tool": 0,
+      "cloud": 0
+    },
+    "types": [],
+    "scopes": []
+  }
+}

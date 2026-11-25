@@ -237,19 +237,22 @@ type estateFile struct {
 	Sources   []snapshot.Source   `json:"sources"`
 }
 
-// stateFlags is a flag that may be given more than once.
-type stateFlags []string
+// listFlag is a flag that may be given more than once.
+type listFlag []string
 
-func (f *stateFlags) String() string     { return strings.Join(*f, ", ") }
-func (f *stateFlags) Set(v string) error { *f = append(*f, v); return nil }
+func (f *listFlag) String() string     { return strings.Join(*f, ", ") }
+func (f *listFlag) Set(v string) error { *f = append(*f, v); return nil }
 
 // runBuild is `snapshot build`: from the Terraform state in one or more
-// backends (--state), or, as a test and development path, from a JSON file of
-// rows (--from-json).
+// backends (--state) and the inventories infraharvest exported (--inventory),
+// or, as a test and development path, from a JSON file of rows (--from-json).
 func runBuild(args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("snapshot build", stderr)
-	var states stateFlags
+	var states, inventories, dropTags listFlag
 	fs.Var(&states, "state", "a Terraform state to read: a path, s3://bucket/prefix, gs://bucket/prefix, azblob://account/container/prefix or hcp://organization/workspace (repeat for more)")
+	fs.Var(&inventories, "inventory", "an infraharvest export to read: an inventory/v1 or ocsf-inventory/v1 JSON file (repeat for more)")
+	fs.Var(&dropTags, "drop-tag", "a tag key to drop from the inventories' resources (repeat it, or separate keys with commas)")
+	dropAllTags := fs.Bool("drop-tags", false, "drop every tag of the inventories' resources")
 	from := fs.String("from-json", "", "the JSON file of nodes, edges and sources to build from (test and development path)")
 	out := fs.String("out", filepath.Join(".infra-ontology", "snapshots"), "the folder to write the snapshot folder into")
 	label := fs.String("label", "", "a name for the snapshot (overrides the file's)")
@@ -259,11 +262,11 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	switch {
-	case *from != "" && len(states) > 0:
-		fmt.Fprintln(stderr, "infra-ontology snapshot build: give --state or --from-json, not both")
+	case *from != "" && (len(states) > 0 || len(inventories) > 0):
+		fmt.Fprintln(stderr, "infra-ontology snapshot build: give --state and --inventory, or --from-json, not both")
 		return exitUsage
-	case *from == "" && len(states) == 0:
-		fmt.Fprintln(stderr, "infra-ontology snapshot build: --state LOCATION is required (or --from-json FILE, for tests)")
+	case *from == "" && len(states) == 0 && len(inventories) == 0:
+		fmt.Fprintln(stderr, "infra-ontology snapshot build: --state LOCATION or --inventory FILE is required (or --from-json FILE, for tests)")
 		return exitUsage
 	}
 	var (
@@ -301,10 +304,14 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 		tables = snapshot.Tables{Nodes: est.Nodes, Edges: est.Edges, Sources: est.Sources}
 	} else {
 		var res ingest.Result
-		if res, code = readStates(states, opts.CreatedAt, stderr); code != exitOK && code != exitPartial {
+		in := ingest.Options{
+			CollectedAt: opts.CreatedAt, Collector: "infra-ontology", CollectorVersion: version.Version,
+			DropTags: splitKeys(dropTags), DropAllTags: *dropAllTags,
+		}
+		if res, code = readSources(states, inventories, in, stderr); code != exitOK && code != exitPartial {
 			return code
 		}
-		tables, opts.Limits = res.Tables, res.Limits
+		tables, opts.Limits, opts.Redaction = res.Tables, res.Limits, res.Redaction
 	}
 	s, err := snapshot.Build(tables, opts)
 	if err != nil {
@@ -336,10 +343,11 @@ func readEstate(file string, est *estateFile, stderr io.Writer) int {
 	return exitOK
 }
 
-// readStates reads the states the user named. It returns exitUsage for a
-// location this build cannot read, exitFailed if none could be read and
-// exitPartial if some could not: the snapshot then says which.
-func readStates(locations []string, at time.Time, stderr io.Writer) (ingest.Result, int) {
+// readSources reads the states and the inventories the user named. It returns
+// exitUsage for a location this build cannot read or a file that is not there,
+// exitFailed if nothing could be read and exitPartial if some could not: the
+// snapshot then says which.
+func readSources(locations, files []string, o ingest.Options, stderr io.Writer) (ingest.Result, int) {
 	resolved := make([]string, 0, len(locations))
 	for _, l := range locations {
 		r, err := ingest.Resolve(l)
@@ -352,20 +360,42 @@ func readStates(locations []string, at time.Time, stderr io.Writer) (ingest.Resu
 		}
 		resolved = append(resolved, r)
 	}
+	for _, f := range files {
+		if st, err := os.Stat(f); err != nil || !st.Mode().IsRegular() {
+			fmt.Fprintf(stderr, "infra-ontology snapshot build: --inventory %s is not a file\n", ingest.Sanitise(f))
+			return ingest.Result{}, exitUsage
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	res, err := ingest.Build(ingest.ReadAll(ctx, resolved, ingest.Stores()), ingest.Options{
-		CollectedAt: at, Collector: "infra-ontology", CollectorVersion: version.Version,
-	})
+	res, err := ingest.BuildAll(ingest.ReadAll(ctx, resolved, ingest.Stores()), ingest.ReadInventories(files), o)
 	if err != nil {
 		fmt.Fprintf(stderr, "infra-ontology snapshot build: %v\n", err)
 		return ingest.Result{}, exitFailed
 	}
 	if res.Failed > 0 {
-		fmt.Fprintf(stderr, "infra-ontology snapshot build: %d of %d states could not be read; the snapshot is partial and lists them\n", res.Failed, len(resolved))
+		what, total := "states could not be read", len(resolved)
+		if len(files) > 0 {
+			what, total = "sources could not be read in full", len(resolved)+len(files)
+		}
+		fmt.Fprintf(stderr, "infra-ontology snapshot build: %d of %d %s; the snapshot is partial and lists them\n", res.Failed, total, what)
 		return res, exitPartial
 	}
 	return res, exitOK
+}
+
+// splitKeys splits the values of --drop-tag, which may hold several keys
+// separated by commas.
+func splitKeys(values []string) []string {
+	var keys []string
+	for _, v := range values {
+		for k := range strings.SplitSeq(v, ",") {
+			if k = strings.TrimSpace(k); k != "" {
+				keys = append(keys, k)
+			}
+		}
+	}
+	return keys
 }
 
 // cleanErr removes credentials from an error before it is printed.

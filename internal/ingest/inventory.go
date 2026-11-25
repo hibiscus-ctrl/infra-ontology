@@ -1,0 +1,336 @@
+// Copyright 2026 Gabriel Ignat
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package ingest
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"slices"
+	"strings"
+	"time"
+)
+
+// The documents infraharvest's export writes that this package reads. The
+// format is infraharvest's, published as JSON Schema under its schemas/ folder;
+// nothing here imports its internal packages, and what is read is a projection
+// of the document: the decoder skips every member this package does not name,
+// so nothing it does not name can reach a snapshot.
+const (
+	SchemaInventory     = "infraharvest/inventory/v1"
+	SchemaOCSFInventory = "infraharvest/ocsf-inventory/v1"
+)
+
+// Inventory is what one exported document says, as the resources it lists and
+// how complete it is.
+type Inventory struct {
+	// Location is the file the document was read from, as it was named.
+	Location string
+	// Schema is the document's schema: SchemaInventory or SchemaOCSFInventory.
+	Schema string
+	// Tool and ToolVersion name the program that wrote it.
+	Tool, ToolVersion string
+	// GeneratedAt is when the document says it was made (the time of its
+	// newest event, for an OCSF inventory).
+	GeneratedAt time.Time
+	// IDsHashed says the document's IDs, names and addresses are HMACs, so
+	// that they cannot be matched to state.
+	IDsHashed bool
+	// TagKeysDropped are the tag keys the export dropped, AllTagsDropped
+	// that it dropped every tag.
+	TagKeysDropped []string
+	AllTagsDropped bool
+	// Failed is how many resources the run behind the document could not
+	// import (inventory/v1 counts them; an OCSF inventory does not).
+	Failed    int
+	Resources []Resource
+	// Digest is the SHA-256 of what is kept of the document.
+	Digest string
+}
+
+// Resource is one resource of an inventory.
+type Resource struct {
+	// Cloud is aws, azure or gcp; Account and Region are as the document
+	// gives them ("" where it has none).
+	Cloud, Account, Region string
+	// Type is the Terraform type the document names the resource by.
+	Type string
+	// ID is the import ID, and CloudID what the cloud itself calls the
+	// resource (an ARN, or an Azure resource ID) where the document says.
+	ID, CloudID string
+	Name        string
+	Tags        map[string]string
+	// Status is managed, other_iac or unmanaged; Basis says whether a state,
+	// a tag or nothing says so (state, tag or none).
+	Status, Basis string
+	// Address, Module and Root say where an import wrote the resource's
+	// configuration, when it did (an OCSF inventory only).
+	Address, Module, Root string
+}
+
+// ReadInventory reads the exported document in file. A file that is not an
+// inventory/v1 or ocsf-inventory/v1 document is an error, and so is one with a
+// resource that lacks a type or an ID.
+func ReadInventory(file string) (Inventory, error) {
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		return Inventory{}, err
+	}
+	inv, err := ParseInventory(raw)
+	inv.Location = file
+	return inv, err
+}
+
+// ParseInventory reads an exported document, of either schema.
+func ParseInventory(raw []byte) (Inventory, error) {
+	var head struct {
+		Schema string `json:"schema"`
+	}
+	if err := decode(raw, &head); err != nil {
+		return Inventory{}, err
+	}
+	var (
+		inv Inventory
+		err error
+	)
+	switch head.Schema {
+	case SchemaInventory:
+		inv, err = parseInventoryV1(raw)
+	case SchemaOCSFInventory:
+		inv, err = parseOCSF(raw)
+	case "":
+		return Inventory{}, errors.New("not an infraharvest document: it has no schema member")
+	default:
+		return Inventory{}, fmt.Errorf("schema %q is not %s or %s", Scrub(head.Schema), SchemaInventory, SchemaOCSFInventory)
+	}
+	if err != nil {
+		return Inventory{}, err
+	}
+	inv.Schema = head.Schema
+	inv.Digest = digestOf(inv)
+	return inv, nil
+}
+
+// decode reads one JSON value and nothing after it. Members that the target
+// does not name are skipped.
+func decode(raw []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if err := dec.Decode(v); err != nil {
+		return fmt.Errorf("not JSON of the expected shape: %w", err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return errors.New("data after the JSON document")
+	}
+	return nil
+}
+
+var cloudNames = map[string]string{"aws": "aws", "azure": "azure", "google": "gcp", "AWS": "aws", "Azure": "azure", "GCP": "gcp"}
+
+var statuses = map[string]bool{"managed": true, "other_iac": true, "unmanaged": true}
+
+type redactionV1 struct {
+	TagKeysDropped []string `json:"tag_keys_dropped"`
+	AllTagsDropped bool     `json:"all_tags_dropped"`
+	IDsHashed      bool     `json:"ids_hashed"`
+}
+
+type inventoryV1 struct {
+	GeneratedAt string `json:"generated_at"`
+	Tool        struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	} `json:"tool"`
+	Cloud     string `json:"cloud"`
+	Resources []struct {
+		Type        string            `json:"type"`
+		ID          string            `json:"id"`
+		Account     string            `json:"account"`
+		Status      string            `json:"status"`
+		StatusBasis string            `json:"status_basis"`
+		Name        string            `json:"name"`
+		Region      string            `json:"region"`
+		Tags        map[string]string `json:"tags"`
+	} `json:"resources"`
+	Redaction redactionV1 `json:"redaction"`
+	Coverage  struct {
+		Totals struct {
+			Failed int `json:"failed"`
+		} `json:"totals"`
+	} `json:"coverage"`
+}
+
+func parseInventoryV1(raw []byte) (Inventory, error) {
+	var d inventoryV1
+	if err := decode(raw, &d); err != nil {
+		return Inventory{}, err
+	}
+	cloud, ok := cloudNames[d.Cloud]
+	if !ok {
+		return Inventory{}, fmt.Errorf("cloud %q is not aws, azure or google", Scrub(d.Cloud))
+	}
+	at, err := time.Parse(time.RFC3339, d.GeneratedAt)
+	if err != nil {
+		return Inventory{}, fmt.Errorf("generated_at: %w", err)
+	}
+	inv := Inventory{
+		Tool: d.Tool.Name, ToolVersion: d.Tool.Version, GeneratedAt: at.UTC(),
+		IDsHashed: d.Redaction.IDsHashed, TagKeysDropped: d.Redaction.TagKeysDropped,
+		AllTagsDropped: d.Redaction.AllTagsDropped, Failed: d.Coverage.Totals.Failed,
+	}
+	for i, r := range d.Resources {
+		if r.Type == "" || r.ID == "" {
+			return Inventory{}, fmt.Errorf("resources[%d]: a type and an id are required", i)
+		}
+		if !statuses[r.Status] {
+			return Inventory{}, fmt.Errorf("resources[%d]: status %q is not managed, other_iac or unmanaged", i, Scrub(r.Status))
+		}
+		inv.Resources = append(inv.Resources, Resource{
+			Cloud: cloud, Account: knownAccount(r.Account), Region: r.Region, Type: r.Type, ID: r.ID,
+			Name: r.Name, Tags: r.Tags, Status: r.Status, Basis: r.StatusBasis,
+		})
+	}
+	return inv, nil
+}
+
+// knownAccount is the account of a resource, "" where infraharvest could not
+// tell it (it writes "unknown").
+func knownAccount(a string) string {
+	if a == "unknown" {
+		return ""
+	}
+	return a
+}
+
+type ocsfInventory struct {
+	Redaction redactionV1 `json:"redaction"`
+	Events    []struct {
+		Time     int64 `json:"time"`
+		Metadata struct {
+			Product struct {
+				Name    string `json:"name"`
+				Version string `json:"version"`
+			} `json:"product"`
+		} `json:"metadata"`
+		Cloud struct {
+			Provider string `json:"provider"`
+			Account  *struct {
+				UID string `json:"uid"`
+			} `json:"account"`
+			Region string `json:"region"`
+		} `json:"cloud"`
+		Resources []struct {
+			Type   string   `json:"type"`
+			UID    string   `json:"uid"`
+			UIDAlt string   `json:"uid_alt"`
+			Name   string   `json:"name"`
+			Region string   `json:"region"`
+			Labels []string `json:"labels"`
+			Tags   []struct {
+				Name  string `json:"name"`
+				Value string `json:"value"`
+			} `json:"tags"`
+			IaC *struct {
+				Address       string `json:"address"`
+				ModuleAddress string `json:"module_address"`
+				Path          string `json:"path"`
+				StateKey      string `json:"state_key"`
+			} `json:"iac"`
+		} `json:"resources"`
+	} `json:"events"`
+}
+
+func parseOCSF(raw []byte) (Inventory, error) {
+	var d ocsfInventory
+	if err := decode(raw, &d); err != nil {
+		return Inventory{}, err
+	}
+	inv := Inventory{
+		IDsHashed: d.Redaction.IDsHashed, TagKeysDropped: d.Redaction.TagKeysDropped,
+		AllTagsDropped: d.Redaction.AllTagsDropped,
+	}
+	var newest int64
+	for i, e := range d.Events {
+		cloud, ok := cloudNames[e.Cloud.Provider]
+		if !ok {
+			return Inventory{}, fmt.Errorf("events[%d]: cloud provider %q is not AWS, Azure or GCP", i, Scrub(e.Cloud.Provider))
+		}
+		newest = max(newest, e.Time)
+		inv.Tool, inv.ToolVersion = e.Metadata.Product.Name, e.Metadata.Product.Version
+		account := ""
+		if e.Cloud.Account != nil {
+			account = knownAccount(e.Cloud.Account.UID)
+		}
+		for j, r := range e.Resources {
+			if r.Type == "" || r.UID == "" {
+				return Inventory{}, fmt.Errorf("events[%d].resources[%d]: a type and a uid are required", i, j)
+			}
+			res := Resource{
+				Cloud: cloud, Account: account, Region: firstOf(r.Region, e.Cloud.Region), Type: r.Type,
+				ID: r.UID, Name: r.Name, Status: "unmanaged", Basis: "none",
+			}
+			if r.UIDAlt != "" {
+				// The uid is what the cloud calls it; the import ID, which
+				// state holds, is the alternative.
+				res.ID, res.CloudID = r.UIDAlt, r.UID
+			}
+			for _, l := range r.Labels {
+				switch k, v, _ := strings.Cut(l, ":"); k {
+				case "status":
+					if statuses[v] {
+						res.Status = v
+					}
+				case "status_basis":
+					res.Basis = v
+				}
+			}
+			if len(r.Tags) > 0 {
+				res.Tags = make(map[string]string, len(r.Tags))
+				for _, t := range r.Tags {
+					res.Tags[t.Name] = t.Value
+				}
+			}
+			if r.IaC != nil {
+				res.Address, res.Module = r.IaC.Address, r.IaC.ModuleAddress
+				res.Root = firstOf(r.IaC.StateKey, r.IaC.Path)
+			}
+			inv.Resources = append(inv.Resources, res)
+		}
+	}
+	if newest > 0 {
+		inv.GeneratedAt = time.UnixMilli(newest).UTC()
+	}
+	return inv, nil
+}
+
+// digestOf is the SHA-256 of what is kept of an inventory, in the order of
+// its resources: like a state's, it is not the hash of the file's bytes, but
+// changes whenever anything this reader keeps changes.
+func digestOf(inv Inventory) string {
+	h := sha256.New()
+	w := func(fields ...string) {
+		for _, f := range fields {
+			h.Write([]byte(f))
+			h.Write([]byte{0})
+		}
+		h.Write([]byte{'\n'})
+	}
+	w(inv.Schema, inv.Tool, inv.ToolVersion, inv.GeneratedAt.Format(time.RFC3339))
+	for _, r := range inv.Resources {
+		w(r.Cloud, r.Account, r.Region, r.Type, r.ID, r.CloudID, r.Name, r.Status, r.Basis, r.Address, r.Module, r.Root)
+		keys := make([]string, 0, len(r.Tags))
+		for k := range r.Tags {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		for _, k := range keys {
+			w("tag", k, r.Tags[k])
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}

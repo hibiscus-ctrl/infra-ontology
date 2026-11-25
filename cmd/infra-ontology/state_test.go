@@ -173,7 +173,7 @@ func TestStateUsageErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"nothing", nil, "--state LOCATION is required"},
+		{"nothing", nil, "--state LOCATION or --inventory FILE is required"},
 		{"both", []string{"--state", "x", "--from-json", "y"}, "not both"},
 		{"missing file", []string{"--state", "no/such/file.tfstate"}, "no/such/file.tfstate"},
 		{"azblob without account", []string{"--state", "azblob://"}, "name an account"},
