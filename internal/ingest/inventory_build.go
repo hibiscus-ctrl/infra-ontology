@@ -105,7 +105,7 @@ func (b *builder) openInventories(reads []InventoryRead) []*invResource {
 	for _, r := range sorted {
 		loc := Sanitise(r.Location)
 		src := snapshot.Source{
-			SourceID: inventorySourceID(loc), Kind: snapshot.SourceInventory, Backend: BackendFile, Location: loc,
+			SourceID: b.invSourceID(loc), Kind: snapshot.SourceInventory, Backend: BackendFile, Location: loc,
 			CollectedAt: b.at(), Collector: b.o.Collector, CollectorVersion: b.o.CollectorVersion,
 			Status: snapshot.StatusOK,
 		}
@@ -159,7 +159,7 @@ func (b *builder) mergeResource(merged map[invKey]*invResource, inv Inventory, s
 		}
 	}
 	res.Root = Sanitise(res.Root)
-	res.Tags = b.filterTags(res)
+	res.Tags = b.filterTags(res, inv.IDsHashed)
 	arn := ""
 	if strings.HasPrefix(res.CloudID, "arn:") {
 		arn = res.CloudID
@@ -198,26 +198,40 @@ func (b *builder) mergeResource(merged map[invKey]*invResource, inv Inventory, s
 
 // filterTags keeps the tags of a resource that do not look like secrets (and
 // that the user did not ask to drop), and counts the ones that go.
-func (b *builder) filterTags(res Resource) map[string]string {
-	kept := b.tagFilter.Tags(res.Tags, res.ID, res.Name)
+func (b *builder) filterTags(res Resource, hashed bool) map[string]string {
+	f := b.tagFilter
+	if hashed {
+		// An inventory that hashed its IDs hashed the tags that gave them away.
+		f = b.hashedTagFilter
+	}
+	kept := f.Tags(res.Tags, res.ID, res.Name)
 	b.tagsDropped += len(res.Tags) - len(kept)
 	return kept
 }
 
 // stateIndex finds the resources a state manages by what an inventory calls
-// them.
+// them. The hashed maps are for an inventory that hashed its IDs: they hold
+// the hashes, under the key of the build, of what the states hold.
 type stateIndex struct {
 	byID, byPath map[string][]string
+	hByID, hPath map[string][]string
+	// byType lists the nodes a state manages by cloud and Terraform type.
+	byType map[string][]string
 }
 
 func indexKey(cloud, typ, v string) string { return cloud + "|" + typ + "|" + v }
 
 func (b *builder) indexState() stateIndex {
-	idx := stateIndex{byID: map[string][]string{}, byPath: map[string][]string{}}
+	idx := stateIndex{
+		byID: map[string][]string{}, byPath: map[string][]string{},
+		hByID: map[string][]string{}, hPath: map[string][]string{}, byType: map[string][]string{},
+	}
 	for _, n := range b.nodes {
 		if n.Kind != snapshot.KindResource || n.ManagedStatus != snapshot.Managed || n.Address == "" {
 			continue
 		}
+		tk := n.Cloud + "|" + n.TFType
+		idx.byType[tk] = append(idx.byType[tk], n.NodeID)
 		if n.NativeID != "" {
 			k := indexKey(n.Cloud, n.TFType, n.NativeID)
 			idx.byID[k] = append(idx.byID[k], n.NodeID)
@@ -226,18 +240,47 @@ func (b *builder) indexState() stateIndex {
 			k := indexKey(n.Cloud, n.TFType, n.ARNOrPath)
 			idx.byPath[k] = append(idx.byPath[k], n.NodeID)
 		}
+		if raw, ok := b.raw[n.NodeID]; ok {
+			// The export hashed the ID as the provider wrote it, which
+			// may differ in case from the one Azure resources are
+			// compared by here: both are looked for.
+			for _, v := range []string{raw.id, strings.ToLower(raw.id), n.NativeID} {
+				if v != "" {
+					k := indexKey(n.Cloud, n.TFType, b.h(v))
+					idx.hByID[k] = appendOnce(idx.hByID[k], n.NodeID)
+				}
+			}
+			for _, v := range []string{raw.arn, n.ARNOrPath} {
+				if v != "" {
+					k := indexKey(n.Cloud, n.TFType, b.h(v))
+					idx.hPath[k] = appendOnce(idx.hPath[k], n.NodeID)
+				}
+			}
+		}
 		b.stateManaged = append(b.stateManaged, n.NodeID)
 	}
 	sort.Strings(b.stateManaged)
 	return idx
 }
 
+func appendOnce(s []string, v string) []string {
+	if slices.Contains(s, v) {
+		return s
+	}
+	return append(s, v)
+}
+
 // match returns the nodes of the state that are the same thing as r: the same
 // type and the same ID, or the same ARN or resource path, in an account and a
-// region that do not contradict each other.
+// region that do not contradict each other. A resource of an inventory that
+// hashed its IDs is matched by hash, which needs the key of the build.
 func (b *builder) match(idx stateIndex, r *invResource) []string {
+	byID, byPath := idx.byID, idx.byPath
 	if r.hashed {
-		return nil
+		if b.key == nil {
+			return nil
+		}
+		byID, byPath = idx.hByID, idx.hPath
 	}
 	var found []string
 	add := func(ids []string) {
@@ -247,9 +290,9 @@ func (b *builder) match(idx stateIndex, r *invResource) []string {
 			}
 		}
 	}
-	add(idx.byID[indexKey(r.Cloud, r.tfType, r.sc.id)])
+	add(byID[indexKey(r.Cloud, r.tfType, r.sc.id)])
 	if r.sc.path != "" {
-		add(idx.byPath[indexKey(r.Cloud, r.tfType, r.sc.path)])
+		add(byPath[indexKey(r.Cloud, r.tfType, r.sc.path)])
 	}
 	sort.Strings(found)
 	return found
@@ -262,30 +305,72 @@ func compatible(n snapshot.Node, r *invResource) bool {
 		(n.Region == "" || r.Region == "" || n.Region == r.Region)
 }
 
+// expectedInState says a state manages a resource of the type and in the
+// account of r, so that an inventory that lists none of them has probably
+// been hashed with another key.
+func (b *builder) expectedInState(idx stateIndex, r *invResource) bool {
+	for _, id := range idx.byType[r.Cloud+"|"+r.tfType] {
+		if compatible(b.nodes[id], r) {
+			return true
+		}
+	}
+	return false
+}
+
+// placement is where an inventory resource goes: into the nodes of the states
+// that manage it, or, with none, into a node of its own.
+type placement struct {
+	r   *invResource
+	ids []string
+}
+
 // addInventories puts the resources of the inventories into the rows: a
 // resource a state manages is that state's node, with what the inventory adds;
 // any other is a node of its own, with the status the inventory gives it.
 func (b *builder) addInventories(reads []InventoryRead) {
 	resources := b.openInventories(reads)
 	idx := b.indexState()
+	placed := make([]placement, 0, len(resources))
+	matched, expected := map[string]int{}, map[string]bool{}
 	for _, r := range resources {
 		ids := b.match(idx, r)
 		if id := b.nodeIDOf(r); len(ids) == 0 && b.isManagedNode(id) {
 			ids = []string{id}
 		}
-		if len(ids) > 0 {
-			for _, id := range ids {
-				b.join(id, r)
+		if r.hashed && b.key != nil {
+			if len(ids) > 0 {
+				matched[r.source]++
+			} else if b.expectedInState(idx, r) {
+				expected[r.source] = true
+			}
+		}
+		placed = append(placed, placement{r, ids})
+	}
+	// A hashed inventory that lists things the states manage and matches
+	// none of them was hashed with another key: what it calls unmanaged says
+	// nothing.
+	for src := range expected {
+		if matched[src] == 0 {
+			b.mismatched[src] = true
+		}
+	}
+	for _, p := range placed {
+		if len(p.ids) > 0 {
+			for _, id := range p.ids {
+				b.join(id, p.r)
 			}
 			continue
 		}
-		b.addInventoryNode(r)
+		b.addInventoryNode(p.r)
 	}
 	b.inventoryEdges()
 }
 
 func (b *builder) nodeIDOf(r *invResource) string {
-	return snapshot.NodeID(snapshot.KindResource, r.Cloud, r.Account, r.Region, r.tfType, r.sc.id)
+	if r.hashed {
+		return b.hashedNodeID(snapshot.KindResource, r.Cloud, r.Account, r.Region, r.tfType, r.sc.id)
+	}
+	return b.nodeID(snapshot.KindResource, r.Cloud, r.Account, r.Region, r.tfType, r.sc.id)
 }
 
 func (b *builder) isManagedNode(id string) bool {
@@ -299,14 +384,28 @@ func (b *builder) join(id string, r *invResource) {
 	n := b.nodes[id]
 	n.Account, n.Region = firstOf(n.Account, r.Account), firstOf(n.Region, r.Region)
 	n.InventoryType = r.Type
-	n.Name = firstOf(n.Name, r.Name)
-	n.ARNOrPath = firstOf(n.ARNOrPath, r.sc.path)
+	if n.Name == "" && r.Name != "" {
+		n.Name = r.Name
+		b.markIfHashed(id, r, "name")
+	}
+	if n.ARNOrPath == "" && r.sc.path != "" {
+		n.ARNOrPath = r.sc.path
+		b.markIfHashed(id, r, "arn_or_path")
+	}
 	if len(n.Tags) == 0 {
 		n.Tags = r.Tags
 	}
 	b.nodes[id] = n
 	b.invSource[id] = firstOf(b.invSource[id], r.source)
 	b.joined[id] = true
+}
+
+// markIfHashed notes that a field of a node was taken from r, which an
+// inventory hashed, so that it is not hashed twice.
+func (b *builder) markIfHashed(id string, r *invResource, fields ...string) {
+	if r.hashed {
+		b.markHashed(id, fields...)
+	}
 }
 
 // addInventoryNode adds the node of a resource that no state holds.
@@ -316,9 +415,9 @@ func (b *builder) addInventoryNode(r *invResource) {
 		// Terraform's tags say it is managed: a guess, not a state.
 		conf = snapshot.Inferred
 	}
-	if r.hashed && b.hadStates && status == snapshot.Unmanaged {
-		// Its ID is a hash, which cannot be looked for in the states read:
-		// not being in them says nothing.
+	if r.hashed && b.hadStates && status == snapshot.Unmanaged && (b.key == nil || b.mismatched[r.source]) {
+		// Its ID is a hash the states cannot be searched for, or one made
+		// with another key: not being in them says nothing.
 		status = snapshot.Unknown
 	}
 	if status == snapshot.Managed && b.hadStates {
@@ -333,7 +432,11 @@ func (b *builder) addInventoryNode(r *invResource) {
 	if hasTerraformPrefix(r.tfType) {
 		n.TFType = r.tfType
 	}
+	_, existed := b.nodes[n.NodeID]
 	b.addNode(n)
+	if !existed {
+		b.markIfHashed(n.NodeID, r, "native_id", "arn_or_path", "name", "address", "module", "root")
+	}
 	b.invSource[n.NodeID] = r.source
 }
 
@@ -356,13 +459,17 @@ func (b *builder) inventoryEdges() {
 	byType := map[string][]string{}
 	byNative := map[string][]string{}
 	parents := map[string][]string{}
+	// Nodes are compared by native ID as it will be written: in a hashed
+	// build, the IDs of states are hashed here as the inventories' are.
+	native := func(id string, n snapshot.Node) string { return b.hashField(id, "native_id", n.NativeID) }
 	for id, n := range b.nodes {
 		if n.Kind != snapshot.KindResource || n.NativeID == "" || isDataAddress(n.Address) {
 			continue
 		}
 		ids = append(ids, id)
-		byType[indexKey(n.Cloud, n.TFType, n.NativeID)] = append(byType[indexKey(n.Cloud, n.TFType, n.NativeID)], id)
-		byNative[n.Cloud+"|"+n.NativeID] = append(byNative[n.Cloud+"|"+n.NativeID], id)
+		k := indexKey(n.Cloud, n.TFType, native(id, n))
+		byType[k] = append(byType[k], id)
+		byNative[n.Cloud+"|"+native(id, n)] = append(byNative[n.Cloud+"|"+native(id, n)], id)
 		if n.TFType != "" {
 			for _, child := range b.tm.Children(n.TFType) {
 				if !slices.Contains(parents[child], n.TFType) {
@@ -375,7 +482,7 @@ func (b *builder) inventoryEdges() {
 	for _, id := range ids {
 		n := b.nodes[id]
 		for _, p := range parents[n.TFType] {
-			for _, pid := range byType[indexKey(n.Cloud, p, n.NativeID)] {
+			for _, pid := range byType[indexKey(n.Cloud, p, native(id, n))] {
 				if src := firstOf(b.invSource[id], b.invSource[pid]); src != "" && pid != id && sameScope(n, b.nodes[pid]) {
 					b.addEdge(snapshot.EdgeContainedIn, BasisCatalogueChild, snapshot.Computed, id, pid, src)
 				}
@@ -385,7 +492,7 @@ func (b *builder) inventoryEdges() {
 			continue
 		}
 		for _, anc := range azureParents(n.NativeID) {
-			if to := byNative["azure|"+anc]; len(to) > 0 && to[0] != id {
+			if to := byNative["azure|"+b.h(anc)]; len(to) > 0 && to[0] != id {
 				sort.Strings(to)
 				b.addEdge(snapshot.EdgeContainedIn, BasisResourcePath, snapshot.Computed, id, to[0], b.invSource[id])
 				break
@@ -435,8 +542,11 @@ func (b *builder) inventoryLimits() []string {
 	if b.tagsDropped > 0 {
 		s = append(s, fmt.Sprintf("%d tags look like secrets, or were dropped by request, and are not kept.", b.tagsDropped))
 	}
-	if n := b.hashedInventories(); n > 0 {
-		s = append(s, fmt.Sprintf("%d inventories hash their IDs, so their resources cannot be matched to state; where states were read, those the inventory calls unmanaged are unknown.", n))
+	switch n := b.hashedInventories(); {
+	case n > 0 && b.key == nil:
+		s = append(s, fmt.Sprintf("%d inventories hash their IDs, so their resources cannot be matched to state; where states were read, those the inventory calls unmanaged are unknown. Build with --hash-ids and the same key to match them.", n))
+	case len(b.mismatched) > 0:
+		s = append(s, fmt.Sprintf("%d inventories hash their IDs and list resources of the types and accounts the states manage, but match none of them, so they were probably hashed with another key; what they call unmanaged is unknown.", len(b.mismatched)))
 	}
 	if b.partialInventories > 0 {
 		s = append(s, fmt.Sprintf("%d inventories count resources whose import failed.", b.partialInventories))
@@ -492,7 +602,7 @@ func (b *builder) notInInventory() int {
 
 // redaction says which tag keys were dropped, and whether all were.
 func (b *builder) redaction() snapshot.Redaction {
-	keys := b.tagFilter.DroppedKeys()
+	keys := append(b.tagFilter.DroppedKeys(), b.hashedTagFilter.DroppedKeys()...)
 	all := b.o.DropAllTags
 	upstream := 0
 	for _, inv := range b.inventories {
@@ -508,5 +618,9 @@ func (b *builder) redaction() snapshot.Redaction {
 	if len(b.inventories) > 0 && upstream == len(b.inventories) {
 		all = true
 	}
-	return snapshot.Redaction{TagKeysDropped: keys, AllTagsDropped: all}
+	red := snapshot.Redaction{HashAlgorithm: "none", TagKeysDropped: keys, AllTagsDropped: all}
+	if b.key != nil {
+		red.HashAlgorithm, red.IDsHashed = HashAlgorithm, true
+	}
+	return red
 }

@@ -37,7 +37,13 @@ A resource of an inventory is the same thing as a node a state produced when the
 
 The plan has four statuses and no `missing` or `drifted`, so a resource in a state that no inventory lists stays `managed`. A resource cannot be called gone because an inventory does not list it: the inventory may not cover its type, its account or its region. The manifest's `limits` counts them instead: the resources of the states read that are not in the inventories, where an inventory lists their type in their account.
 
-An inventory that hashes its IDs (`infraharvest export --hash-ids`) cannot be matched to state. Its resources are added as they are, and those it calls `unmanaged` are `unknown` when states were read, since being absent from them says nothing. `limits` says how many inventories do so.
+An inventory that hashes its IDs (`infraharvest export --hash-ids`) is matched to state when the snapshot is built with `--hash-ids` and the same key ([docs/state.md](state.md#hashing-ids)): the build hashes the IDs and ARNs the states hold, as infraharvest does, and joins the two by hash. What is joined is the same as for an inventory that is not hashed, and what only the inventory lists keeps the status it gives it. Three things limit this:
+
+- A hash cannot be folded to lower case, so an Azure resource ID is hashed as the export wrote it, and joins when the state writes it in the same case (or in lower case).
+- Nothing says which key an export was hashed with. If a hashed inventory lists resources of the types and accounts the states manage and matches none of them, it was probably hashed with another key: what it calls `unmanaged` is `unknown` instead, and `limits` says how many inventories do so.
+- Without `--hash-ids` (or with an inventory that is not hashed and states that are) the IDs cannot be compared. The inventory's resources are added as they are, and those it calls `unmanaged` are `unknown` when states were read, since being absent from them says nothing. `limits` says how many inventories do so.
+
+Inventories that are not hashed are matched in the clear whatever `--hash-ids` says, and their IDs, names, addresses and paths are hashed as the snapshot is written.
 
 A resource listed by more than one document is one node: it keeps the status that knows most (`managed`, then `other_iac`, then `unmanaged`) and what each document gives.
 
