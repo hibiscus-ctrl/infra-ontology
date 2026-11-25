@@ -14,11 +14,10 @@ The archives are named `infra-ontology_<version>_<os>_<arch>`, `.tar.gz` on Linu
 | Linux, Arm64 | `_linux_arm64.tar.gz` |
 | macOS, Intel | `_darwin_amd64.tar.gz` |
 | macOS, Apple silicon | `_darwin_arm64.tar.gz` |
-| Windows, x86-64 | `_windows_amd64.zip` |
 
 They are about 80 MB unpacked.
 
-**Without the query engine.** Every other platform gets a pure-Go build, built with `-tags noduckdb`, whose name ends in `_noquery` before the extension: for example `_linux_386_noquery.tar.gz`, `_linux_riscv64_noquery.tar.gz`, `_freebsd_amd64_noquery.tar.gz` and `_windows_arm64_noquery.zip`. Linux on x86-64 and Arm64 also have a `_noquery` archive, for images that cannot run the full build (below). A `_noquery` binary is about 9 MB. `snapshot build`, `snapshot verify` and `diff` work as usual; `query`, `verify --answer` and `serve-mcp` say that the build has no query engine and print the SQL to run with DuckDB on the snapshot folder.
+**Without the query engine.** Every other platform gets a pure-Go build, built with `-tags noduckdb`, whose name ends in `_noquery` before the extension: for example `_linux_386_noquery.tar.gz`, `_linux_riscv64_noquery.tar.gz`, `_freebsd_amd64_noquery.tar.gz` and `_windows_amd64_noquery.zip`. Windows has no build with the query engine yet: DuckDB's prebuilt Windows library does not link with the current MinGW-w64 toolchain. Linux on x86-64 and Arm64 also have a `_noquery` archive, for images that cannot run the full build (below). A `_noquery` binary is about 9 MB. `snapshot build`, `snapshot verify` and `diff` work as usual; `query`, `verify --answer` and `serve-mcp` say that the build has no query engine and print the SQL to run with DuckDB on the snapshot folder.
 
 ## What the full Linux build needs
 
@@ -56,7 +55,7 @@ sha256sum --ignore-missing --check infra-ontology_1.2.3_SHA256SUMS     # Linux
 grep infra-ontology_1.2.3_darwin_arm64.tar.gz infra-ontology_1.2.3_SHA256SUMS | shasum -a 256 -c   # macOS
 ```
 
-On Windows, compare `(Get-FileHash .\infra-ontology_1.2.3_windows_amd64.zip).Hash` with the line in the checksums file.
+On Windows, compare `(Get-FileHash .\infra-ontology_1.2.3_windows_amd64_noquery.zip).Hash` with the line in the checksums file.
 
 **3. The archive was built by that workflow from this repository (optional).** With the [GitHub CLI](https://cli.github.com/):
 
@@ -70,6 +69,6 @@ Then unpack the archive and run `infra-ontology version`. It prints the release'
 
 ## How a release is built
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`. It builds each full binary on a runner of its own platform (`ubuntu-latest`, `ubuntu-24.04-arm`, `macos-15-intel`, `macos-latest`, `windows-latest` with MinGW-w64), runs it, builds the `_noquery` binaries in pure Go, packs the archives with `scripts/package-release.sh` (sorted, with the commit's timestamp, so the same binaries give the same archives), signs and attests them, and creates a **draft** release. Nothing is published until a maintainer reviews the draft and publishes it. A pull request that touches the release files runs the same build as a trial (`release-check.yml`) and publishes nothing.
+Pushing a `v*` tag runs `.github/workflows/release.yml`. It builds each full binary on a runner of its own platform (`ubuntu-latest`, `ubuntu-24.04-arm`, `macos-15-intel`, `macos-latest`), runs it, builds the `_noquery` binaries in pure Go, packs the archives with `scripts/package-release.sh` (sorted, with the commit's timestamp, so the same binaries give the same archives), signs and attests them, and creates a **draft** release. Nothing is published until a maintainer reviews the draft and publishes it. A pull request that touches the release files runs the same build as a trial (`release-check.yml`) and publishes nothing.
 
 To build it yourself, see the [README](../README.md#build).

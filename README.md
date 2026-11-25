@@ -31,7 +31,7 @@ Download an archive from the [releases page](https://github.com/hibiscus-ctrl/in
 
 ## Build
 
-You need Go (the version in `go.mod`) and, for the query engine, cgo: a C and C++ compiler (`gcc` and `g++`, or the Xcode command line tools; MinGW-w64 on Windows). `go build -tags noduckdb` builds without the engine, in pure Go; `query` then says so. A build with DuckDB is about 77 MB and links `libstdc++` at run time, so on Linux it needs a glibc distribution with libstdc++ installed.
+You need Go (the version in `go.mod`) and, for the query engine, cgo: a C and C++ compiler (`gcc` and `g++`, or the Xcode command line tools; Windows builds without the engine for now). `go build -tags noduckdb` builds without the engine, in pure Go; `query` then says so. A build with DuckDB is about 77 MB and links `libstdc++` at run time, so on Linux it needs a glibc distribution with libstdc++ installed.
 
 ```sh
 make build        # builds ./infra-ontology
