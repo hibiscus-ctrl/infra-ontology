@@ -26,7 +26,7 @@ The folder is named by the creation time (UTC) and the first twelve characters o
 | `status` | `ok`, or `partial` if a source did not read in full |
 | `tables` | for each table: name, file, SHA-256, row count and row schema |
 | `sources_summary` | how many sources, by kind, and the oldest and newest read time |
-| `redaction` | the hash algorithm and whether IDs and addresses are hashed or dropped, which tag keys were dropped, and whether all tags were |
+| `redaction` | the hash algorithm and whether IDs and addresses are hashed or dropped (`addresses_dropped` is true for a snapshot built with `--drop-addresses`, which leaves the `address` and `module` of every node empty, and the `name` of a module call and of a resource a state holds), which tag keys were dropped, and whether all tags were |
 | `coverage` | the clouds, accounts and types the snapshot covers, and the sources that failed with their reasons |
 | `limits` | plain text of what the snapshot cannot tell you |
 

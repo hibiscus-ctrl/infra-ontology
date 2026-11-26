@@ -618,7 +618,7 @@ func (b *builder) redaction() snapshot.Redaction {
 	if len(b.inventories) > 0 && upstream == len(b.inventories) {
 		all = true
 	}
-	red := snapshot.Redaction{HashAlgorithm: "none", TagKeysDropped: keys, AllTagsDropped: all}
+	red := snapshot.Redaction{HashAlgorithm: "none", TagKeysDropped: keys, AllTagsDropped: all, AddressesDropped: b.o.DropAddresses}
 	if b.key != nil {
 		red.HashAlgorithm, red.IDsHashed = HashAlgorithm, true
 	}

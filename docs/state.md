@@ -81,9 +81,23 @@ What is hashed, as the HMAC-SHA256 in hexadecimal that `infraharvest export --ha
 
 Types, accounts, regions, kinds, statuses, counts and times stay readable, as in infraharvest. So do a state's serial, Terraform version and lineage, which is a random UUID. The tags an inventory brings go through infraharvest's tag filter with the key, so a `Name` tag, or a tag whose value is or holds an ID or a name, is hashed too, and a tag whose key names the resource is dropped. A `terraform_remote_state` read from a state that is not in the snapshot is an `external` node with a hashed name, and `limits` does not list its location. The reason a source could not be read is replaced by a fixed text, since an error message holds paths and names; the source's status and hashed location remain.
 
-The same key gives the same hashes, so the same estate gives the same `snapshot_id`, `verify` and `diff` work as they do on any snapshot, and two snapshots hashed with one key can be compared. Two keys give two snapshots with no node in common. A hashed snapshot says so in the manifest (`redaction.hash_algorithm` is `hmac-sha256` and `redaction.ids_hashed` is true) and in `limits`. `--drop-addresses` is not built yet.
+The same key gives the same hashes, so the same estate gives the same `snapshot_id`, `verify` and `diff` work as they do on any snapshot, and two snapshots hashed with one key can be compared. Two keys give two snapshots with no node in common. A hashed snapshot says so in the manifest (`redaction.hash_algorithm` is `hmac-sha256` and `redaction.ids_hashed` is true) and in `limits`.
 
 A test builds a hashed snapshot from the fixtures and fails if the key, in any form, or any value it hides is in any file the command writes.
+
+## Dropping addresses
+
+`--drop-addresses` leaves Terraform addresses out of a snapshot, for sharing it outside the team:
+
+```sh
+infra-ontology snapshot build --state s3://acme-tfstate/prod/ --drop-addresses
+```
+
+The `address` and `module` of every node are empty. The `name` is empty on every module call (it was the last part of the call's path, with its `for_each` or `count` key) and on every resource a state holds (it was the last part of the address, `main` of `aws_vpc.main`), so `tf_type` and `name` no longer give `type.name`. A module call node keeps no `native_id` (it was the state and the call's address), and the placeholder of a `terraform_remote_state` whose backend names no state is told apart by its place in the state, not by its address. The manifest says so: `redaction.addresses_dropped` is true, and `limits` says that addresses and module paths are left out. Edges, sources and the rest of the manifest never held an address; they are as they would be without the flag, and `export graph` writes `redaction.addresses` as `dropped`. Inventories are matched to state by address before they are dropped, so no status changes.
+
+What stays: the `name` of a resource only an inventory holds (the name the cloud gives it, not one made from an address), the `name` of a state root and of an external placeholder (a location), the `root` of each node (the location of its state), and every node ID, edge, status and count, so `diff` still joins. The node IDs of module calls, data sources and resources without an ID are SHA-256 hashes of the state location and the address, and the `root` is still there, so without `--hash-ids` anyone who guesses a state location and a module path or address can compute the hash and confirm the guess. Combine the two flags when the snapshot leaves your hands: with `--hash-ids` those IDs are keyed, the `root` is hashed and the names that stay are hashed too; the same key gives the same snapshot. The `limits` text says this when no key is used. `--drop-addresses` with `--from-json` is a usage error (2), as `--hash-ids` is.
+
+A test builds a snapshot from the fixtures, with the flag alone and with `--hash-ids`, and fails if any address, module path, resource name, module call name or `for_each` key of the fixtures is in any file the command writes, in its output, or in what `verify`, `export graph` and `diff` write.
 
 ## What it cannot tell you
 

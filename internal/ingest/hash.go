@@ -75,8 +75,38 @@ func (b *builder) hashField(id, field, v string) string {
 // say about where a thing is or what it is called is replaced by its hash.
 // The identifiers of nodes, edges and sources were hashed when they were made.
 // Types, accounts, regions, tags (which the tag filter dealt with), counts and
-// times stay as they are. Without a key it returns the rows as they are.
+// times stay as they are. Without a key it hashes nothing. With DropAddresses
+// it also leaves every Terraform address, the module path that is part of one,
+// the name a state gave a resource or a module call (the last part of its
+// address) and a module call's native ID out of the nodes; the matching of
+// state to inventory is done by then, so nothing needs them. Node IDs are
+// not changed: a diff joins on them.
 func (b *builder) redactTables(t snapshot.Tables) snapshot.Tables {
+	if b.key == nil && !b.o.DropAddresses {
+		return t
+	}
+	if b.o.DropAddresses {
+		states := map[string]bool{}
+		for _, s := range t.Sources {
+			states[s.SourceID] = s.Kind == snapshot.SourceState
+		}
+		for i, n := range t.Nodes {
+			n.Address, n.Module = "", ""
+			switch {
+			case n.Kind == snapshot.KindModuleCall:
+				// Its native ID is the state and the call's address, and its
+				// name is the last part of that address, with its key.
+				n.NativeID, n.Name = "", ""
+			case n.Kind == snapshot.KindResource && states[n.SourceID]:
+				// A state made the node, so its name is the Terraform name,
+				// the last part of the address. A joined inventory only
+				// fills a name the state lacks, which goes too. A node only
+				// an inventory holds keeps the name the cloud gives it.
+				n.Name = ""
+			}
+			t.Nodes[i] = n
+		}
+	}
 	if b.key == nil {
 		return t
 	}

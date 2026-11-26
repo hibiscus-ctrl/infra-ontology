@@ -279,6 +279,7 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 	dropAllTags := fs.Bool("drop-tags", false, "drop every tag of the inventories' resources")
 	hashIDs := fs.Bool("hash-ids", false, "hash IDs, ARNs, names, Terraform addresses and state locations with HMAC-SHA256, under a key from "+keyEnv+" (or "+secretscan.KeyEnv+") or --hash-key-file")
 	hashKeyFile := fs.String("hash-key-file", "", "the file that holds the key --hash-ids hashes with (16 bytes at least)")
+	dropAddresses := fs.Bool("drop-addresses", false, "leave Terraform addresses, module paths and the Terraform names of resources and module calls out of the snapshot's nodes, to share it outside the team; node IDs of module calls, data sources and resources without an ID stay unkeyed hashes of state location and address unless --hash-ids is also used")
 	from := fs.String("from-json", "", "the JSON file of nodes, edges and sources to build from (test and development path)")
 	out := fs.String("out", filepath.Join(".infra-ontology", "snapshots"), "the folder to write the snapshot folder into")
 	label := fs.String("label", "", "a name for the snapshot (overrides the file's)")
@@ -299,6 +300,9 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	case *hashIDs && *from != "":
 		fmt.Fprintln(stderr, "infra-ontology snapshot build: --hash-ids hashes what --state and --inventory read, not --from-json")
+		return exitUsage
+	case *dropAddresses && *from != "":
+		fmt.Fprintln(stderr, "infra-ontology snapshot build: --drop-addresses applies to what --state and --inventory read, not --from-json")
 		return exitUsage
 	}
 	var (
@@ -338,7 +342,7 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 		var res ingest.Result
 		in := ingest.Options{
 			CollectedAt: opts.CreatedAt, Collector: "infra-ontology", CollectorVersion: version.Version,
-			DropTags: splitKeys(dropTags), DropAllTags: *dropAllTags,
+			DropTags: splitKeys(dropTags), DropAllTags: *dropAllTags, DropAddresses: *dropAddresses,
 		}
 		if *hashIDs {
 			key, err := readHashKey(*hashKeyFile)
