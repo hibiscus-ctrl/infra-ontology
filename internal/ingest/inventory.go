@@ -63,9 +63,11 @@ type Inventory struct {
 }
 
 // Coverage is what an inventory/v1 document says of what its run could not
-// list: the resources it failed to read and the ones it skipped, in all, by
-// scope and by type. Only these two counts are kept: nothing of a resource's
-// values is in them.
+// list or left out: the resources it failed to read, skipped, left out of the
+// import (excluded by its selection, or left out of the output), in all, by
+// scope and by type. Only these counts are kept: nothing of a resource's
+// values is in them. A document that does not give the totals, the types and
+// the scopes has no Coverage (see parseInventoryV1).
 type Coverage struct {
 	Totals Counts
 	// Scopes and Types are keyed by the scope and by the Terraform type as
@@ -74,12 +76,17 @@ type Coverage struct {
 }
 
 // Counts are the resources of a part of a listing that could not be read
-// (Failed) or that the run skipped (Skipped). A listing with neither is
-// complete.
-type Counts struct{ Failed, Skipped int }
+// (Failed), that the run skipped (Skipped), that its selection left out
+// (Excluded), or that it left out of the import (LeftOut). A listing with none
+// is complete: the run looked at every resource there and imported or listed
+// it.
+type Counts struct{ Failed, Skipped, Excluded, LeftOut int }
 
-// Complete says no resource of the part was failed or skipped.
-func (c Counts) Complete() bool { return c.Failed == 0 && c.Skipped == 0 }
+// Complete says no resource of the part was failed, skipped, excluded or
+// left out.
+func (c Counts) Complete() bool {
+	return c.Failed == 0 && c.Skipped == 0 && c.Excluded == 0 && c.LeftOut == 0
+}
 
 // Resource is one resource of an inventory.
 type Resource struct {
@@ -187,7 +194,7 @@ type inventoryV1 struct {
 	} `json:"resources"`
 	Redaction redactionV1 `json:"redaction"`
 	Coverage  *struct {
-		Totals countsV1 `json:"totals"`
+		Totals *countsV1 `json:"totals"`
 		Types  []struct {
 			Type   string   `json:"type"`
 			Counts countsV1 `json:"counts"`
@@ -201,8 +208,10 @@ type inventoryV1 struct {
 
 // countsV1 is the part of a document's counts this package reads.
 type countsV1 struct {
-	Failed  int `json:"failed"`
-	Skipped int `json:"skipped"`
+	Failed   int `json:"failed"`
+	Skipped  int `json:"skipped"`
+	Excluded int `json:"excluded"`
+	LeftOut  int `json:"left_out"`
 }
 
 func parseInventoryV1(raw []byte) (Inventory, error) {
@@ -223,10 +232,15 @@ func parseInventoryV1(raw []byte) (Inventory, error) {
 		IDsHashed: d.Redaction.IDsHashed, TagKeysDropped: d.Redaction.TagKeysDropped,
 		AllTagsDropped: d.Redaction.AllTagsDropped, Scopes: d.Scopes,
 	}
-	if c := d.Coverage; c != nil {
-		inv.Failed = c.Totals.Failed
+	if d.Coverage != nil && d.Coverage.Totals != nil {
+		inv.Failed = d.Coverage.Totals.Failed
+	}
+	// A document that lacks the totals, the types or the scopes, such as
+	// "coverage":{}, does not say how complete its listing was: it has no
+	// Coverage, rather than one that counts nothing.
+	if c := d.Coverage; c != nil && c.Totals != nil && c.Types != nil && c.Scopes != nil {
 		inv.Coverage = &Coverage{
-			Totals: Counts(c.Totals), Scopes: make(map[string]Counts, len(c.Scopes)), Types: make(map[string]Counts, len(c.Types)),
+			Totals: Counts(*c.Totals), Scopes: make(map[string]Counts, len(c.Scopes)), Types: make(map[string]Counts, len(c.Types)),
 		}
 		for _, s := range c.Scopes {
 			inv.Coverage.Scopes[s.Scope] = addCounts(inv.Coverage.Scopes[s.Scope], Counts(s.Counts))
@@ -250,7 +264,20 @@ func parseInventoryV1(raw []byte) (Inventory, error) {
 	return inv, nil
 }
 
-func addCounts(a, b Counts) Counts { return Counts{a.Failed + b.Failed, a.Skipped + b.Skipped} }
+func addCounts(a, b Counts) Counts {
+	return Counts{a.Failed + b.Failed, a.Skipped + b.Skipped, a.Excluded + b.Excluded, a.LeftOut + b.LeftOut}
+}
+
+// countFields are the counts of c, as the digest has them.
+func countFields(c Counts) []string {
+	f := []string{strconv.Itoa(c.Failed), strconv.Itoa(c.Skipped)}
+	if c.Excluded > 0 || c.LeftOut > 0 {
+		// Only when counted, so that the digest of a document that counts neither
+		// is what it was.
+		f = append(f, strconv.Itoa(c.Excluded), strconv.Itoa(c.LeftOut))
+	}
+	return f
+}
 
 // knownAccount is the account of a resource, "" where infraharvest could not
 // tell it (it writes "unknown").
@@ -379,12 +406,12 @@ func digestOf(inv Inventory) string {
 		// What the listing could not read decides what its absences mean, so
 		// a change to it changes the digest.
 		c := inv.Coverage
-		w("coverage", strconv.Itoa(c.Totals.Failed), strconv.Itoa(c.Totals.Skipped))
+		w(append([]string{"coverage"}, countFields(c.Totals)...)...)
 		for _, scope := range slices.Sorted(maps.Keys(inv.Coverage.Scopes)) {
-			w("scope", scope, strconv.Itoa(c.Scopes[scope].Failed), strconv.Itoa(c.Scopes[scope].Skipped))
+			w(append([]string{"scope", scope}, countFields(c.Scopes[scope])...)...)
 		}
 		for _, typ := range slices.Sorted(maps.Keys(inv.Coverage.Types)) {
-			w("type", typ, strconv.Itoa(c.Types[typ].Failed), strconv.Itoa(c.Types[typ].Skipped))
+			w(append([]string{"type", typ}, countFields(c.Types[typ])...)...)
 		}
 		w(append([]string{"scopes"}, slices.Sorted(slices.Values(inv.Scopes))...)...)
 	}

@@ -101,8 +101,11 @@ func azureGroup(id string) string {
 func cloudOfScope(provider string) string { return cloudNames[provider] }
 
 // usable says the document can show that a resource is missing at all: it is
-// an inventory/v1 document that says how complete it is, in which no import
-// failed, with no resource of it left out of the snapshot, and which, if it
+// an inventory/v1 document that says how complete it is (totals, types and
+// scopes), in which no import failed, the selection of the run left no
+// resource out and no resource was left out of the import (an infraharvest
+// run with --id, --tag, --where, include or exclude lists only some of what is
+// there), with no resource of it left out of the snapshot, and which, if it
 // hashes its IDs, was matched to the states with their key.
 func (b *builder) usable(l *listing) bool {
 	switch {
@@ -111,13 +114,14 @@ func (b *builder) usable(l *listing) bool {
 	case l.inv.IDsHashed && (b.key == nil || b.mismatched[l.source]):
 		return false
 	}
-	return l.inv.Coverage.Totals.Failed == 0
+	t := l.inv.Coverage.Totals
+	return t.Failed == 0 && t.Excluded == 0 && t.LeftOut == 0
 }
 
 // covers says the listing lists the type of n in the account and region of n
 // in full: every scope of the document that is the account and region has
-// no failed or skipped resource, the type has none, the document lists the
-// type there, and its IDs of the type compare to state (a resource of the
+// no failed, skipped, excluded or left-out resource, the type has none,
+// the document lists the type there, and its IDs of the type compare to state (a resource of the
 // type was joined). For Azure, which has no region in an ID, the account is
 // the scope, and the listing must list the resource group of n too: a listing
 // of one group is not a listing of the subscription.
