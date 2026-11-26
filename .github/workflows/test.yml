@@ -104,6 +104,11 @@ jobs:
         run: go test -tags noduckdb ./...
         env:
           INFRA_ONTOLOGY_NEED_COSIGN: "1"
+      # The Test step only replays the fuzz seeds; both targets are pure Go, so they fuzz here and not in the DuckDB job.
+      - name: Fuzz the state parser
+        run: go test -tags noduckdb -run='^$' -fuzz='^FuzzStateIngest$' -fuzztime=30s ./internal/ingest
+      - name: Fuzz the dialect checker
+        run: go test -tags noduckdb -run='^$' -fuzz='^FuzzCheckSerialized$' -fuzztime=30s ./internal/query
       - name: Check nothing of the engine is linked
         run: |
           if go list -deps -tags noduckdb ./... | grep -iE 'duckdb|apache/arrow'; then
