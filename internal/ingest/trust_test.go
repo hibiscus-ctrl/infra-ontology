@@ -252,13 +252,15 @@ func countEdges(tb snapshot.Tables, kind string) int {
 	return n
 }
 
-// dataRole is a data.aws_iam_role of the ARN of the role called name.
-func dataRole(name, label string) string {
+// dataRole is a data.aws_iam_role, labelled label, of the ARN of the role ci.
+func dataRole(label string) string {
+	const name = "ci"
 	return `{"mode":"data","type":"aws_iam_role","name":"` + label + `","provider":"provider[\"registry.terraform.io/hashicorp/aws\"]",
 	 "instances":[{"attributes":{"id":"` + name + `","arn":"arn:aws:iam::111111111111:role/` + name + `"}}]}`
 }
 
-func stateRead(t *testing.T, root string, resources ...string) Read {
+func stateRead(t *testing.T, resources ...string) Read {
+	const root = iamRoot
 	t.Helper()
 	state := `{"version":4,"serial":1,"lineage":"l","terraform_version":"1.9.0","outputs":{},"resources":[` + strings.Join(resources, ",") + `]}`
 	d, err := tfstate.Parse([]byte(state), root)
@@ -274,8 +276,8 @@ func stateRead(t *testing.T, root string, resources ...string) Read {
 func TestTrustPrefersManagedRole(t *testing.T) {
 	ci := `{"AWS":"arn:aws:iam::111111111111:role/ci"}`
 	for i := 0; i < 40; i++ {
-		res := build(t, []Read{stateRead(t, iamRoot,
-			dataRole("ci", "a"), dataRole("ci", "z"),
+		res := build(t, []Read{stateRead(t,
+			dataRole("a"), dataRole("z"),
 			roleResource(t, "ci", policy(allow(`{"Service":"ec2.amazonaws.com"}`, ""))),
 			roleResource(t, "app", policy(allow(ci, ""))))})
 		managed := nodeAt(t, res.Tables, iamRoot, "aws_iam_role.ci").NodeID
@@ -287,8 +289,8 @@ func TestTrustPrefersManagedRole(t *testing.T) {
 	// Only data sources: the lowest node ID, every time.
 	var first string
 	for i := 0; i < 40; i++ {
-		res := build(t, []Read{stateRead(t, iamRoot,
-			dataRole("ci", "a"), dataRole("ci", "b"), dataRole("ci", "c"),
+		res := build(t, []Read{stateRead(t,
+			dataRole("a"), dataRole("b"), dataRole("c"),
 			roleResource(t, "app", policy(allow(ci, ""))))})
 		want := ""
 		for _, n := range res.Tables.Nodes {
@@ -314,7 +316,7 @@ func TestTrustRoleWithoutAccountIsInferred(t *testing.T) {
 	p, _ := json.Marshal(policy(allow(`{"AWS":"arn:aws:iam::111111111111:role/ci"}`, "")))
 	noARN := `{"mode":"managed","type":"aws_iam_role","name":"bare","provider":"provider[\"registry.terraform.io/hashicorp/aws\"]",
 	 "instances":[{"attributes":{"id":"bare","assume_role_policy":` + string(p) + `}}]}`
-	res := build(t, []Read{stateRead(t, iamRoot, noARN)})
+	res := build(t, []Read{stateRead(t, noARN)})
 	if a := nodeAt(t, res.Tables, iamRoot, "aws_iam_role.bare").Account; a != "" {
 		t.Fatalf("the role has account %q, the test needs none", a)
 	}
@@ -334,7 +336,7 @@ func TestTrustPrincipalCap(t *testing.T) {
 		}
 		return `{"AWS":[` + strings.Join(ps, ",") + `]}`
 	}
-	res := build(t, []Read{stateRead(t, iamRoot,
+	res := build(t, []Read{stateRead(t,
 		roleResource(t, "atcap", policy(allow(names(maxTrustPrincipals), ""))),
 		roleResource(t, "overcap", policy(allow(names(maxTrustPrincipals+1), ""))))})
 	if n := len(canAssume(t, res.Tables, "atcap")); n != maxTrustPrincipals {
@@ -357,7 +359,7 @@ func TestTrustPrincipalCap(t *testing.T) {
 // ARN its own placeholder, and a value that is not of the shape its type has
 // makes no edge and is never written.
 func TestTrustPrincipalShapes(t *testing.T) {
-	res := build(t, []Read{stateRead(t, iamRoot,
+	res := build(t, []Read{stateRead(t,
 		roleResource(t, "star", policy(allow(`"*"`, ""))),
 		roleResource(t, "bare", policy(allow(`"PLANTED-BARE-SECRET"`, ""))),
 		roleResource(t, "wild", policy(allow(`{"AWS":["arn:aws:iam::111111111111:role/ci-*","arn:aws:iam::111111111111:role/*"]}`, ""))),
@@ -418,7 +420,7 @@ func TestTrustPrincipalShapes(t *testing.T) {
 func TestTrustForeignAccountsHashed(t *testing.T) {
 	const planted, own = "987654321098", "111111111111"
 	reads := func() []Read {
-		return []Read{stateRead(t, iamRoot,
+		return []Read{stateRead(t,
 			roleResource(t, "a", policy(
 				allow(`{"AWS":"arn:aws:iam::`+planted+`:role/vendor"}`, ""),
 				allow(`{"AWS":"arn:aws:iam::`+planted+`:root"}`, ""),
