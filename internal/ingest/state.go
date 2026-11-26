@@ -155,8 +155,9 @@ func BuildAll(reads []Read, invs []InventoryRead, o Options) (Result, error) {
 			return Result{}, fmt.Errorf("no state or inventory could be read:%s", b.failureList())
 		}
 	}
+	tables := b.redactTables(b.tables())
 	return Result{
-		Tables: b.redactTables(b.tables()), Limits: b.limits(), Redaction: b.redaction(),
+		Tables: tables, Limits: b.limits(), Redaction: b.redaction(tables),
 		Failed: len(b.failed) + len(b.failedInventories) + b.partialInventories,
 	}, nil
 }
@@ -400,7 +401,7 @@ func (b *builder) instanceNode(s *docState, in tfstate.Instance) snapshot.Node {
 			// Before the filter, which may hash a tag that holds the name.
 			raw = b.dropAddressTags(raw, in.Address, in.Module, in.Name)
 		}
-		tags = b.filterTags(Resource{ID: id, Name: in.Name, Tags: raw}, false)
+		tags = b.filterTags(Resource{ID: id, Name: in.Name, Tags: raw}, false, arn, sc.id, sc.path, in.IdentityID)
 	}
 	return snapshot.Node{
 		NodeID: nodeID,

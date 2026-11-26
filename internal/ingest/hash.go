@@ -4,7 +4,9 @@
 package ingest
 
 import (
+	"encoding/hex"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/IgnatG/infraharvest/pkg/secretscan"
@@ -148,10 +150,42 @@ const minNamedTF = 4
 // instanceKey matches the key of a count or for_each instance in an address.
 var instanceKey = regexp.MustCompile(`\[[^\]]*\]`)
 
-// dropAddressTags returns tags less those whose key or value holds, in any
-// case, an address, a module path or a Terraform name (left empty where it is
-// not one, as for a resource only an inventory holds) that is long enough to
-// say something. It runs before the tag filter on the tags of a state, which
+// quotedKey matches the key of an instance in an address, quoted (for_each)
+// or not (count).
+var quotedKey = regexp.MustCompile(`\[("(?:[^"\\]|\\.)*"|[^\]]*)\]`)
+
+// addressNames returns the names an address and a module path hold besides
+// the address itself: each module call's name, and each quoted instance key
+// (a for_each key; a number is a count index, which says nothing).
+func addressNames(address, module string) []string {
+	var out []string
+	for _, a := range []string{module, address} {
+		parts := splitTop(a)
+		for i := 0; i+1 < len(parts) && parts[i] == "module"; i += 2 {
+			if n := instanceKey.ReplaceAllString(parts[i+1], ""); n != "" {
+				out = append(out, n)
+			}
+		}
+		for _, m := range quotedKey.FindAllStringSubmatch(a, -1) {
+			k := m[1]
+			if len(k) < 2 || k[0] != '"' || k[len(k)-1] != '"' {
+				continue
+			}
+			if u, err := strconv.Unquote(k); err == nil && u != "" {
+				out = append(out, u)
+			}
+		}
+	}
+	return out
+}
+
+// dropAddressTags returns tags less those that give away an address, a module
+// path, a Terraform name, a module call's name or an instance key (left empty
+// where it is not one, as for a resource only an inventory holds). A tag goes
+// when its key or value holds, in any case, the address or the module path, or
+// a name or a key of four characters or more; or, for any length, when its
+// key or value is, in any case, the Terraform name, a call's name or a key
+// (tf = web). It runs before the tag filter on the tags of a state, which
 // the filter may hash, and again on the tables, for the tags an inventory
 // brought, and before the address is cleared. The tags that go are counted
 // with the other dropped tags, and their keys are not listed, since a key may
@@ -170,14 +204,25 @@ func (b *builder) dropAddressTags(tags map[string]string, address, module, name 
 	}
 	add(address, 1)
 	add(module, 1)
-	add(name, minNamedTF)
-	if len(needles) == 0 {
+	var exact []string
+	for _, e := range append([]string{name}, addressNames(address, module)...) {
+		if e != "" {
+			exact = append(exact, strings.ToLower(e))
+			add(e, minNamedTF)
+		}
+	}
+	if len(needles) == 0 && len(exact) == 0 {
 		return tags
 	}
 	holds := func(s string) bool {
-		s = strings.ToLower(s)
+		l := strings.ToLower(s)
 		for _, w := range needles {
-			if strings.Contains(s, w) {
+			if strings.Contains(l, w) {
+				return true
+			}
+		}
+		for _, e := range exact {
+			if l == e {
 				return true
 			}
 		}
@@ -193,6 +238,65 @@ func (b *builder) dropAddressTags(tags map[string]string, address, module, name 
 	}
 	if len(kept) == len(tags) {
 		return tags
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return kept
+}
+
+// minIdentifier is the shortest identifier of a node that a tag holding it
+// gives away (secretscan's threshold for IDs and names).
+const minIdentifier = 4
+
+// hashedValue says a tag value is a hash already: 64 hexadecimal digits.
+func hashedValue(v string) bool {
+	if len(v) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(v)
+	return err == nil
+}
+
+// hideIdentifiers is the last step of the tags of a node in a hashed build,
+// after the tag filter, which only looked for the node's ID and name: a tag
+// whose value holds, in any case, another identifier of the node (its ARN, its
+// cloud path, the ID the cloud gives it) has its value hashed, as HashID hashes
+// the node's own ARN or path so that the two join; a tag whose key holds one is
+// dropped, and not listed, since the list would show it. Without a key it
+// changes nothing.
+func (b *builder) hideIdentifiers(tags map[string]string, ids ...string) map[string]string {
+	if b.key == nil || len(tags) == 0 {
+		return tags
+	}
+	var needles []string
+	for _, id := range ids {
+		if len(id) >= minIdentifier {
+			needles = append(needles, strings.ToLower(id))
+		}
+	}
+	if len(needles) == 0 {
+		return tags
+	}
+	holds := func(s string) bool {
+		l := strings.ToLower(s)
+		for _, w := range needles {
+			if strings.Contains(l, w) {
+				return true
+			}
+		}
+		return false
+	}
+	kept := make(map[string]string, len(tags))
+	for k, v := range tags {
+		switch {
+		case holds(k):
+			b.tagsDropped++
+		case !hashedValue(v) && holds(v):
+			kept[k] = secretscan.HashID(b.key, v)
+		default:
+			kept[k] = v
+		}
 	}
 	if len(kept) == 0 {
 		return nil
