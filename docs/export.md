@@ -46,7 +46,7 @@ A document never says more than the snapshot's manifest allows.
 
 - **Plain.** The addresses and roots come across as they are, and `redaction.addresses` is `plain`.
 - **Ids hashed.** The snapshot's ids are already hashed (`hmac-sha256`), and so are its addresses and roots. They come across as they are, `redaction.ids_hashed` is true and `redaction.addresses` is `hashed`. The export never hashes anything itself and has no key. If a snapshot says its ids are hashed and a resource's id, address or root is not a hash, the export refuses and writes nothing, so that a document is never labelled hashed when a name is in it.
-- **Addresses dropped.** `address`, `module_address` and `root` are left out of every node, even if the snapshot's rows still have them, and `redaction.addresses` is `dropped`. Dropping wins over hashing.
+- **Addresses dropped.** A snapshot built with `--drop-addresses` has none to write (`redaction.addresses_dropped`). `address`, `module_address` and `root` are left out of every node, even if the snapshot's rows still have them, and `redaction.addresses` is `dropped`. Dropping wins over hashing.
 
 The environment, the account and the region are not hashed in either export, as in infraharvest's.
 

@@ -75,8 +75,24 @@ func (b *builder) hashField(id, field, v string) string {
 // say about where a thing is or what it is called is replaced by its hash.
 // The identifiers of nodes, edges and sources were hashed when they were made.
 // Types, accounts, regions, tags (which the tag filter dealt with), counts and
-// times stay as they are. Without a key it returns the rows as they are.
+// times stay as they are. Without a key it hashes nothing. With DropAddresses
+// it also leaves every Terraform address, and the module path that is part of
+// one, out of the nodes; the matching of state to inventory is done by then,
+// so nothing needs them.
 func (b *builder) redactTables(t snapshot.Tables) snapshot.Tables {
+	if b.key == nil && !b.o.DropAddresses {
+		return t
+	}
+	if b.o.DropAddresses {
+		for i, n := range t.Nodes {
+			n.Address, n.Module = "", ""
+			if n.Kind == snapshot.KindModuleCall {
+				// Its native ID is the state and the call's address.
+				n.NativeID = ""
+			}
+			t.Nodes[i] = n
+		}
+	}
 	if b.key == nil {
 		return t
 	}

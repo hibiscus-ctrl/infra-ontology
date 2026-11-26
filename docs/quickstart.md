@@ -89,4 +89,4 @@ infraharvest export infrastructure --command discover --out-file inventory.json
 ./infra-ontology snapshot build --state s3://acme-tfstate/prod/ --inventory inventory.json --label prod
 ```
 
-Add `--hash-ids` to hash IDs, names and addresses before a snapshot leaves your machine ([state.md](state.md#hashing-ids)), and read [security.md](security.md) for what is and is not kept.
+Add `--hash-ids` to hash IDs, names and addresses before a snapshot leaves your machine ([state.md](state.md#hashing-ids)), and `--drop-addresses` to leave Terraform addresses out ([state.md](state.md#dropping-addresses)), and read [security.md](security.md) for what is and is not kept.

@@ -49,11 +49,11 @@
       "type": "string"
     },
     "address": {
-      "description": "The Terraform address, for example module.net.aws_vpc.main[0]. Empty when Terraform does not manage the thing.",
+      "description": "The Terraform address, for example module.net.aws_vpc.main[0]. Empty when Terraform does not manage the thing, or when the snapshot was built with --drop-addresses.",
       "type": "string"
     },
     "module": {
-      "description": "The module path of the address, for example module.net. Empty at the root.",
+      "description": "The module path of the address, for example module.net. Empty at the root, or when the snapshot was built with --drop-addresses.",
       "type": "string"
     },
     "root": {

@@ -81,6 +81,10 @@ type Options struct {
 	// values in an infraharvest export made with the same key. It is never
 	// written.
 	HashKey []byte
+	// DropAddresses leaves the Terraform addresses (and module paths) out of
+	// the nodes and says so in the manifest, so a snapshot can be shared
+	// without them. It works with or without HashKey.
+	DropAddresses bool
 }
 
 // Result is the rows of the states, and what they cannot tell you.
@@ -470,7 +474,7 @@ func (b *builder) dependencies(s *docState, from string, in tfstate.Instance) {
 // the state it reads, or to a placeholder when that state is not in the
 // snapshot.
 func (b *builder) remoteStates(s *docState) {
-	for _, rs := range s.doc.RemoteStates {
+	for i, rs := range s.doc.RemoteStates {
 		from := s.root
 		if ids := s.byAddress[rs.Address]; len(ids) > 0 {
 			from = ids[0]
@@ -499,6 +503,12 @@ func (b *builder) remoteStates(s *docState) {
 			b.unplaced++
 			native = "unplaced:" + s.loc + "#" + rs.Address
 			loc = "(unplaced) " + rs.Backend + " backend of " + rs.Address
+			if b.o.DropAddresses {
+				// The address says which data source it is; its place in the
+				// state does too, without naming it.
+				native = "unplaced:" + s.loc + "#" + strconv.Itoa(i)
+				loc = "(unplaced) " + rs.Backend + " backend of a data source"
+			}
 		} else {
 			b.externals[loc] = true
 		}
@@ -529,6 +539,9 @@ func (b *builder) limits() string {
 	s = append(s, b.readFrom()...)
 	if b.key != nil {
 		s = append(s, "IDs, names, Terraform addresses and state locations are HMAC-SHA256 hashes under a key this snapshot does not hold; types, accounts, regions and counts are readable.")
+	}
+	if b.o.DropAddresses {
+		s = append(s, "Terraform addresses and module paths are left out of the nodes.")
 	}
 	if len(b.externals) > 0 {
 		var locs []string
