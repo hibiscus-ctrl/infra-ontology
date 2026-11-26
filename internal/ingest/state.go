@@ -6,13 +6,17 @@
 // source, module call and state, and the edges between them. It keeps what
 // pkg/tfstate keeps, which is the address, the type and the ID or ARN of an
 // instance, and the places a state reads other states from, and writes
-// nothing else: no attribute value, no output value, no tag.
+// nothing else, and the tags, or labels on Google Cloud, that the state holds
+// for it, less the tags that look like secrets: no attribute value and no
+// output value.
 //
 // It also reads the documents infraharvest exports of a live estate
 // (inventory/v1 and ocsf-inventory/v1) and joins them to the states: a
 // resource in both is one managed node, one only in an inventory has the
 // status the inventory gives it. From an inventory it keeps the same
-// identifiers and the tags that do not look like secrets.
+// identifiers and the tags that do not look like secrets; where a resource is
+// in both, the inventory's tags are the node's, and a state's tags stand for
+// the resources no inventory has tags for.
 package ingest
 
 import (
@@ -151,8 +155,9 @@ func BuildAll(reads []Read, invs []InventoryRead, o Options) (Result, error) {
 			return Result{}, fmt.Errorf("no state or inventory could be read:%s", b.failureList())
 		}
 	}
+	tables := b.redactTables(b.tables())
 	return Result{
-		Tables: b.redactTables(b.tables()), Limits: b.limits(), Redaction: b.redaction(),
+		Tables: tables, Limits: b.limits(), Redaction: b.redaction(tables),
 		Failed: len(b.failed) + len(b.failedInventories) + b.partialInventories,
 	}, nil
 }
@@ -387,11 +392,23 @@ func (b *builder) instanceNode(s *docState, in tfstate.Instance) snapshot.Node {
 	if b.key != nil {
 		b.raw[nodeID] = rawID{id: id, arn: arn}
 	}
+	// The tags of a data source are the looked-up resource's, not those of a
+	// resource this state manages, so only a managed resource has any.
+	var tags map[string]string
+	if in.Mode != "data" {
+		raw := in.Tags
+		if b.o.DropAddresses {
+			// Before the filter, which may hash a tag that holds the name.
+			raw = b.dropAddressTags(raw, in.Address, in.Module, in.Name)
+		}
+		tags = b.filterTags(Resource{ID: id, Name: in.Name, Tags: raw}, false, arn, sc.id, sc.path, in.IdentityID)
+	}
 	return snapshot.Node{
 		NodeID: nodeID,
 		Kind:   snapshot.KindResource, Cloud: cloud, Account: sc.account, Region: sc.region,
 		TFType: tfType, NativeID: sc.id, ARNOrPath: sc.path, Name: in.Name,
 		Address: in.Address, Module: in.Module, Root: s.loc,
+		Tags:          tags,
 		ManagedStatus: managed, Confidence: snapshot.Observed, SourceID: s.source,
 	}
 }
@@ -541,7 +558,7 @@ func (b *builder) limits() string {
 		s = append(s, "IDs, names, Terraform addresses and state locations are HMAC-SHA256 hashes under a key this snapshot does not hold; types, accounts, regions and counts are readable.")
 	}
 	if b.o.DropAddresses {
-		s = append(s, "Terraform addresses, module paths and the Terraform names of resources and module calls are left out of the nodes.")
+		s = append(s, "Terraform addresses, module paths and the Terraform names of resources and module calls are left out of the nodes, and so are the tags whose key or value holds one of them.")
 		if b.key == nil {
 			s = append(s, "The node IDs of module calls, data sources and resources without an ID are unkeyed SHA-256 hashes of the state location and the address, so a guessed address can be confirmed; --hash-ids keys them.")
 		}
@@ -586,19 +603,21 @@ func (b *builder) readFrom() []string {
 	switch {
 	case len(b.inventories) == 0:
 		return []string{"Read from Terraform state only: no live inventory was read, so nothing is marked unmanaged.",
-			"Attribute values, output values and tags are never read: the only values kept from a resource are its id and ARN."}
+			"Attribute values and output values are never read: the only values kept from a resource are its id, ARN and tags (labels on Google Cloud), less the tags that look like secrets."}
 	case !b.hadStates:
 		return []string{"Read from infraharvest inventories only: no Terraform state was read, so a resource has the status its inventory gives it and none is matched to a state.",
 			"Attribute values are never read: the only values kept from a resource are its id, ARN and tags, less the tags that look like secrets."}
 	}
 	return []string{"Read from Terraform state and infraharvest inventories: a resource in both is managed, and one only in an inventory has the status its inventory gives it (unmanaged, unless the inventory knows who manages it).",
-		"Attribute values and output values are never read: the only values kept from a resource are its id, ARN and, from an inventory, its tags, less the tags that look like secrets."}
+		"Attribute values and output values are never read: the only values kept from a resource are its id, ARN and its tags, less the tags that look like secrets. A resource in both has the tags of its inventory, or those of its state where the inventory has none."}
 }
 
 // digest is the SHA-256 of what is kept of a state: its serial, lineage and
 // version, and the address, type, id and dependencies of each instance. It is
-// not the hash of the state's bytes, which are not kept, but changes whenever
-// anything this reader keeps changes.
+// not the hash of the state's bytes, which are not kept. Tags are kept but
+// left out of it on purpose: an unkeyed hash over the raw tag values would let
+// anyone confirm a guess at one, a secret that no detector caught included.
+// So a change to a tag alone does not change the digest.
 func digest(d tfstate.Document) string {
 	h := sha256.New()
 	w := func(fields ...string) {

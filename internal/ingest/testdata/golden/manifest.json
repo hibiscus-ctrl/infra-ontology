@@ -1,7 +1,7 @@
 {
   "format": "infra-ontology/snapshot/v1",
   "format_minor": 0,
-  "snapshot_id": "e6b105482c06fb0c20560f14adacb9c117f72b901cedf6086b7282fdab7893d9",
+  "snapshot_id": "6a85a32a994d9e098cdd6d196625284645594008618cc6291a8e391749f4f4c9",
   "parent_id": "",
   "label": "fixture",
   "created_at": "2026-11-25T12:00:00Z",
@@ -21,7 +21,7 @@
     {
       "name": "nodes",
       "file": "nodes.parquet",
-      "sha256": "11ac928af3a7e4c0426ee6eaf828c8ced8359481cbdd927befbcbb0a70c0f1fa",
+      "sha256": "155b9c57013fe2f17e934b86b437e37cbeb39508573abbf16ad76127f313a577",
       "rows": 37,
       "schema": "infra-ontology/node/v1"
     },
@@ -82,5 +82,5 @@
     ],
     "failed_sources": []
   },
-  "limits": "Read from Terraform state only: no live inventory was read, so nothing is marked unmanaged. Attribute values, output values and tags are never read: the only values kept from a resource are its id and ARN. 2 states read by terraform_remote_state are not in this snapshot, so anything that depends on them stops at an external placeholder: s3://acme-other/shared.tfstate, s3://acme-tfstate/env:/staging/net.tfstate. 1 terraform_remote_state data sources use a backend whose settings name no state this reader can place, so they point to a placeholder. 1 dependencies name an address the state does not hold and are left out."
+  "limits": "Read from Terraform state only: no live inventory was read, so nothing is marked unmanaged. Attribute values and output values are never read: the only values kept from a resource are its id, ARN and tags (labels on Google Cloud), less the tags that look like secrets. 2 states read by terraform_remote_state are not in this snapshot, so anything that depends on them stops at an external placeholder: s3://acme-other/shared.tfstate, s3://acme-tfstate/env:/staging/net.tfstate. 1 terraform_remote_state data sources use a backend whose settings name no state this reader can place, so they point to a placeholder. 1 dependencies name an address the state does not hold and are left out."
 }

@@ -87,6 +87,11 @@ type invResource struct {
 	tfType string
 	// hashed says the document it came from hashes its IDs.
 	hashed bool
+	// dropAll and dropKeys are what the export it came from dropped: every
+	// tag, or the tags with these keys. They apply to the tags of a state
+	// the resource is joined to.
+	dropAll  bool
+	dropKeys map[string]bool
 }
 
 type invKey struct{ cloud, account, typ, id string }
@@ -159,7 +164,7 @@ func (b *builder) mergeResource(merged map[invKey]*invResource, inv Inventory, s
 		}
 	}
 	res.Root = Sanitise(res.Root)
-	res.Tags = b.filterTags(res, inv.IDsHashed)
+	res.Tags = b.filterTags(res, inv.IDsHashed, res.CloudID)
 	arn := ""
 	if strings.HasPrefix(res.CloudID, "arn:") {
 		arn = res.CloudID
@@ -171,7 +176,13 @@ func (b *builder) mergeResource(merged map[invKey]*invResource, inv Inventory, s
 			sc.path = strings.ToLower(sc.path)
 		}
 	}
-	r := &invResource{Resource: res, source: source, sc: sc, tfType: b.tm.Canonical(res.Type), hashed: inv.IDsHashed}
+	r := &invResource{Resource: res, source: source, sc: sc, tfType: b.tm.Canonical(res.Type), hashed: inv.IDsHashed, dropAll: inv.AllTagsDropped}
+	for _, k := range inv.TagKeysDropped {
+		if r.dropKeys == nil {
+			r.dropKeys = map[string]bool{}
+		}
+		r.dropKeys[k] = true
+	}
 	r.Account, r.Region = firstOf(sc.account, res.Account), firstOf(sc.region, res.Region)
 	k := invKey{res.Cloud, r.Account, r.tfType, sc.id}
 	old, ok := merged[k]
@@ -185,6 +196,13 @@ func (b *builder) mergeResource(merged map[invKey]*invResource, inv Inventory, s
 	old.Name = firstOf(old.Name, r.Name)
 	old.Address, old.Module, old.Root = firstOf(old.Address, r.Address), firstOf(old.Module, r.Module), firstOf(old.Root, r.Root)
 	old.Region = firstOf(old.Region, r.Region)
+	old.dropAll = old.dropAll || r.dropAll
+	for k := range r.dropKeys {
+		if old.dropKeys == nil {
+			old.dropKeys = map[string]bool{}
+		}
+		old.dropKeys[k] = true
+	}
 	old.sc.path = firstOf(old.sc.path, r.sc.path)
 	for tk, tv := range r.Tags {
 		if old.Tags == nil {
@@ -197,8 +215,10 @@ func (b *builder) mergeResource(merged map[invKey]*invResource, inv Inventory, s
 }
 
 // filterTags keeps the tags of a resource that do not look like secrets (and
-// that the user did not ask to drop), and counts the ones that go.
-func (b *builder) filterTags(res Resource, hashed bool) map[string]string {
+// that the user did not ask to drop), and counts the ones that go. In a hashed
+// build, others are the resource's identifiers besides its ID (its ARN, its
+// cloud path): a tag that holds one is hashed or dropped, as for the ID.
+func (b *builder) filterTags(res Resource, hashed bool, others ...string) map[string]string {
 	f := b.tagFilter
 	if hashed {
 		// An inventory that hashed its IDs hashed the tags that gave them away.
@@ -206,6 +226,11 @@ func (b *builder) filterTags(res Resource, hashed bool) map[string]string {
 	}
 	kept := f.Tags(res.Tags, res.ID, res.Name)
 	b.tagsDropped += len(res.Tags) - len(kept)
+	if !hashed {
+		// The filter looked for the ID and the name; the node's other
+		// identifiers (its ARN or path) are hashed in its fields as well.
+		kept = b.hideIdentifiers(kept, others...)
+	}
 	return kept
 }
 
@@ -392,12 +417,39 @@ func (b *builder) join(id string, r *invResource) {
 		n.ARNOrPath = r.sc.path
 		b.markIfHashed(id, r, "arn_or_path")
 	}
-	if len(n.Tags) == 0 {
+	// The inventory's tags win where it has any: they are what the cloud
+	// holds now. The state's stay for a resource the inventory has none for.
+	// What the export dropped, it dropped for the resource: the state's tags
+	// do not bring it back.
+	if len(r.Tags) > 0 {
 		n.Tags = r.Tags
+	} else {
+		n.Tags = b.applyUpstreamDrops(n.Tags, r)
 	}
 	b.nodes[id] = n
 	b.invSource[id] = firstOf(b.invSource[id], r.source)
 	b.joined[id] = true
+}
+
+// applyUpstreamDrops removes from the tags of a state's node what the export
+// of the inventory it is joined to dropped: every tag, or the tags with the
+// keys it lists.
+func (b *builder) applyUpstreamDrops(tags map[string]string, r *invResource) map[string]string {
+	if len(tags) == 0 || (!r.dropAll && len(r.dropKeys) == 0) {
+		return tags
+	}
+	kept := make(map[string]string, len(tags))
+	for k, v := range tags {
+		if r.dropAll || r.dropKeys[k] {
+			b.tagsDropped++
+			continue
+		}
+		kept[k] = v
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return kept
 }
 
 // markIfHashed notes that a field of a node was taken from r, which an
@@ -601,7 +653,7 @@ func (b *builder) notInInventory() int {
 }
 
 // redaction says which tag keys were dropped, and whether all were.
-func (b *builder) redaction() snapshot.Redaction {
+func (b *builder) redaction(t snapshot.Tables) snapshot.Redaction {
 	keys := append(b.tagFilter.DroppedKeys(), b.hashedTagFilter.DroppedKeys()...)
 	all := b.o.DropAllTags
 	upstream := 0
@@ -617,6 +669,14 @@ func (b *builder) redaction() snapshot.Redaction {
 	}
 	if len(b.inventories) > 0 && upstream == len(b.inventories) {
 		all = true
+	}
+	// Every tag was dropped only if no node carries one: a state's tags stay
+	// for a resource no inventory that dropped its own is joined to.
+	for _, n := range t.Nodes {
+		if len(n.Tags) > 0 {
+			all = false
+			break
+		}
 	}
 	red := snapshot.Redaction{HashAlgorithm: "none", TagKeysDropped: keys, AllTagsDropped: all, AddressesDropped: b.o.DropAddresses}
 	if b.key != nil {
