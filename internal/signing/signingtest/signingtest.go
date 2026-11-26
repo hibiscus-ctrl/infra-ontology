@@ -49,7 +49,7 @@ type Keys struct {
 }
 
 // NewKeys writes a new key pair of the kind named: "p256", "p384", "p521" or
-// "ed25519", "rsa2048", "rsa3072", "rsa4096" or "rsa1024" (a size signing
+// "ed25519", "rsa2048", "rsa3072", "rsa4096" or "rsa2560" (a size signing
 // refuses). The private key is PKCS #8, unencrypted.
 func NewKeys(t *testing.T, kind string) Keys {
 	t.Helper()
@@ -64,8 +64,8 @@ func NewKeys(t *testing.T, kind string) Keys {
 		priv, err = ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
 	case "ed25519":
 		_, priv, err = ed25519.GenerateKey(rand.Reader)
-	case "rsa1024":
-		priv, err = rsa.GenerateKey(rand.Reader, 1024) //nolint:gosec // a size signing must refuse
+	case "rsa2560":
+		priv, err = rsa.GenerateKey(rand.Reader, 2560) // a size signing must refuse
 	case "rsa2048":
 		priv, err = rsa.GenerateKey(rand.Reader, 2048)
 	case "rsa3072":

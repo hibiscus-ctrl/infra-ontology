@@ -239,7 +239,7 @@ func TestSigningRefusesWhatItShouldNot(t *testing.T) {
 	}
 
 	for name, key := range map[string]string{
-		"a missing": filepath.Join(t.TempDir(), "nope"), "a public": keys.Public, "a 1024-bit RSA": signingtest.NewKeys(t, "rsa1024").Private,
+		"a missing": filepath.Join(t.TempDir(), "nope"), "a public": keys.Public, "a 2560-bit RSA": signingtest.NewKeys(t, "rsa2560").Private,
 	} {
 		if err := SignWithKey(estate(t), key, nil, false); err == nil {
 			t.Errorf("signing with %s key", name)
