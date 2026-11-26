@@ -73,7 +73,7 @@ For either kind:
 - Add a test that makes the kind from a fixture and checks it, as `hasEdge` does in `internal/ingest/state_test.go`. `internal/snapshot/estate_test.go` builds the sample estate the snapshot golden files come from, so add the kind there if the golden files should hold it.
 - Run `make golden` and review the diff. It rewrites the golden files of `internal/snapshot`, `internal/ingest`, `internal/export` and `internal/query`, under each package's `testdata/`, including `internal/snapshot/testdata/estate.json`. Do not edit a golden file by hand.
 - Run `make schemas`, which checks every schema compiles and validates what the code writes.
-- If the change adds a kind, consider raising `FormatMinor` in `internal/snapshot/types.go`: the format page says `format_minor` counts the additions. The manifest golden files record it, so `make golden` updates them.
+- If the change adds a kind, raise `FormatMinor` in `internal/snapshot/types.go`: the format page says `format_minor` counts the additions. The manifest golden files record it, so `make golden` updates them.
 
 ## Rules for the code
 
