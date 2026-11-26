@@ -92,6 +92,10 @@ jobs:
         uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
+      # The signing tests check bundles with `cosign verify-blob`, and skip
+      # without it.
+      - name: Install cosign
+        uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
       - name: Build
         run: go build -tags noduckdb ./...
       - name: Vet
