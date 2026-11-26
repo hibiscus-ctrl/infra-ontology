@@ -480,7 +480,7 @@ func (b *builder) remoteStates(s *docState) {
 			from = ids[0]
 		}
 		found := false
-		for _, want := range consumerKeys(rs) {
+		for _, want := range consumerKeys(rs, s.doc.Source) {
 			for key, producers := range b.producers {
 				if !matches(key, want) {
 					continue
@@ -496,7 +496,7 @@ func (b *builder) remoteStates(s *docState) {
 		if found {
 			continue
 		}
-		loc, ok := remoteLocation(rs)
+		loc, ok := remoteLocation(rs, s.doc.Source)
 		native := loc
 		if !ok {
 			// The settings name no state this reader can place.

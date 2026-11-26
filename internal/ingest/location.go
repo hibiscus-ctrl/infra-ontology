@@ -208,7 +208,7 @@ func producerKey(source string) string {
 // consumerKeys are the keys a terraform_remote_state's configuration can
 // name a state by: what the backend writes the workspace's state as. The
 // remote state of a local file is matched by what its path ends in.
-func consumerKeys(rs tfstate.RemoteState) []string {
+func consumerKeys(rs tfstate.RemoteState, from string) []string {
 	ws := rs.Workspace
 	named := ws != "" && ws != "default"
 	switch rs.Backend {
@@ -252,7 +252,16 @@ func consumerKeys(rs tfstate.RemoteState) []string {
 		if rs.Key == "" {
 			return nil
 		}
-		return []string{"local|" + path.Clean(filepath.ToSlash(rs.Key))}
+		resolved := localPath(rs.Key, from)
+		keys := []string{"local|" + resolved}
+		// The path as written is offered too, matched by what a producer path
+		// ends in, as before paths were placed: it finds states read from
+		// another layout than the one they were written in. A path that climbs
+		// out (..) is only matched where it resolves.
+		if plain := path.Clean(filepath.ToSlash(rs.Key)); plain != resolved && !strings.HasPrefix(plain, "..") {
+			keys = append(keys, "local|"+plain)
+		}
+		return keys
 	}
 	return nil
 }
@@ -260,7 +269,7 @@ func consumerKeys(rs tfstate.RemoteState) []string {
 // remoteLocation writes where a terraform_remote_state reads from, as a
 // location, for the placeholder of a state that is not in the snapshot. ok is
 // false where the configuration does not say enough to write one.
-func remoteLocation(rs tfstate.RemoteState) (string, bool) {
+func remoteLocation(rs tfstate.RemoteState, from string) (string, bool) {
 	ws := rs.Workspace
 	named := ws != "" && ws != "default"
 	var loc string
@@ -304,7 +313,7 @@ func remoteLocation(rs tfstate.RemoteState) (string, bool) {
 		if rs.Key == "" {
 			return "", false
 		}
-		loc = rs.Key
+		loc = localPath(rs.Key, from)
 	default:
 		return "", false
 	}
@@ -322,4 +331,16 @@ func matches(producer, consumer string) bool {
 		return !strings.HasPrefix(rest, "..") && strings.HasSuffix(p, "/"+rest)
 	}
 	return false
+}
+
+// localPath is the slash path a local terraform_remote_state reads: a
+// relative path is taken from the directory of the consumer state, where the
+// consumer is a local file, and the result is cleaned. An absolute path is
+// only cleaned.
+func localPath(key, from string) string {
+	k := filepath.ToSlash(key)
+	if path.IsAbs(k) || filepath.IsAbs(key) || from == "" || strings.Contains(from, "://") {
+		return path.Clean(k)
+	}
+	return path.Join(path.Dir(filepath.ToSlash(from)), k)
 }
