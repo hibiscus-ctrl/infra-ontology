@@ -92,12 +92,18 @@ jobs:
         uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
+      # The signing tests check bundles with `cosign verify-blob`, and skip
+      # without it.
+      - name: Install cosign
+        uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
       - name: Build
         run: go build -tags noduckdb ./...
       - name: Vet
         run: go vet -tags noduckdb ./...
       - name: Test
         run: go test -tags noduckdb ./...
+        env:
+          INFRA_ONTOLOGY_NEED_COSIGN: "1"
       - name: Check nothing of the engine is linked
         run: |
           if go list -deps -tags noduckdb ./... | grep -iE 'duckdb|apache/arrow'; then

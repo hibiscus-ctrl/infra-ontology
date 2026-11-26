@@ -61,7 +61,7 @@ func (f verifyFlags) check() (signing.Verifier, error) {
 // the manifest, signed with a key file or keyless.
 func runSign(args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("snapshot sign", stderr)
-	key := fs.String("key", "", "sign with this private key file: a PEM ECDSA (P-256, P-384, P-521) or Ed25519 key, or a cosign key (its password in COSIGN_PASSWORD)")
+	key := fs.String("key", "", "sign with this private key file: a PEM ECDSA (P-256, P-384, P-521), Ed25519 or RSA (2048, 3072, 4096) key, or a cosign key (its password in COSIGN_PASSWORD)")
 	keyless := fs.Bool("keyless", false, "sign without a key: an OIDC token (a GitHub Actions job with id-token: write, or SIGSTORE_ID_TOKEN) buys a short-lived certificate from Fulcio, and Rekor records it")
 	force := fs.Bool("force", false, "replace a signature the snapshot already has")
 	dirs, ok := parse(fs, args, 1, 1, stderr)

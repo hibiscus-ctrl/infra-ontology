@@ -38,7 +38,7 @@ func signed(t *testing.T) (dir string, keys signingtest.Keys) {
 }
 
 func TestSignWithKeyThenVerify(t *testing.T) {
-	for _, kind := range []string{"p256", "p384", "p521"} {
+	for _, kind := range []string{"p256", "p384", "p521", "ed25519", "rsa2048", "rsa3072"} {
 		t.Run(kind, func(t *testing.T) {
 			dir := estate(t)
 			keys := signingtest.NewKeys(t, kind)
@@ -239,7 +239,7 @@ func TestSigningRefusesWhatItShouldNot(t *testing.T) {
 	}
 
 	for name, key := range map[string]string{
-		"a missing": filepath.Join(t.TempDir(), "nope"), "a public": keys.Public, "an Ed25519": signingtest.NewKeys(t, "ed25519").Private,
+		"a missing": filepath.Join(t.TempDir(), "nope"), "a public": keys.Public, "a 2560-bit RSA": signingtest.NewKeys(t, "rsa2560").Private,
 	} {
 		if err := SignWithKey(estate(t), key, nil, false); err == nil {
 			t.Errorf("signing with %s key", name)
