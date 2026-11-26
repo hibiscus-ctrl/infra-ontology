@@ -88,12 +88,37 @@ func (b *builder) addTrust(states []*docState) {
 			if len(in.Trust) == 0 {
 				continue
 			}
+			if distinctPrincipals(in.Trust) > maxTrustPrincipals {
+				// A policy this long is not one a person wrote: no edges, so that
+				// it cannot make millions of nodes.
+				b.trust.unreadable++
+				continue
+			}
 			for _, id := range s.byAddress[in.Address] {
 				b.trust.roles++
 				b.roleTrust(s, id, in.Trust)
 			}
 		}
 	}
+}
+
+// maxTrustPrincipals is the most distinct principals one role's trust policy
+// may name for its edges to be made; infraharvest caps the same.
+const maxTrustPrincipals = 500
+
+// distinctPrincipals counts the distinct principals the statements name, and
+// stops counting past the cap.
+func distinctPrincipals(stmts []tfstate.TrustStatement) int {
+	seen := map[tfstate.TrustPrincipal]struct{}{}
+	for _, st := range stmts {
+		for _, p := range st.Principals {
+			seen[p] = struct{}{}
+			if len(seen) > maxTrustPrincipals {
+				return len(seen)
+			}
+		}
+	}
+	return len(seen)
 }
 
 // arnRank orders the nodes of one ARN: 0 for one a state manages (or did, and
@@ -225,7 +250,7 @@ func (b *builder) trustLimits() []string {
 	}
 	s := []string{"can_assume edges come only from the trust policies of the aws_iam_role resources a state holds: a role made outside Terraform has none, and identity policies, permission boundaries, service control policies and session policies are not read, so an edge says a trust policy allows it, not that the principal can. An account, a wildcard, a condition, a Deny statement or another account makes an edge inferred, and no condition or Deny is evaluated."}
 	if t.unreadable > 0 {
-		s = append(s, fmt.Sprintf("%d roles have a trust policy that could not be read and have no can_assume edge.", t.unreadable))
+		s = append(s, fmt.Sprintf("%d roles have a trust policy that could not be read, or that names more than %d principals, and have no can_assume edge.", t.unreadable, maxTrustPrincipals))
 	}
 	if t.skipped > 0 {
 		s = append(s, fmt.Sprintf("%d principals of trust policies (federated providers, canonical users, sessions, unique IDs of deleted principals and ARNs of other services) are not turned into edges.", t.skipped))

@@ -5,6 +5,7 @@ package ingest
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -319,5 +320,34 @@ func TestTrustRoleWithoutAccountIsInferred(t *testing.T) {
 	es := canAssume(t, res.Tables, "bare")
 	if len(es) != 1 || es[0].Confidence != snapshot.Inferred || es[0].Basis != BasisTrustPolicy {
 		t.Errorf("edge: %+v", es)
+	}
+}
+
+// A role whose policy names more principals than the cap has no edge and is
+// counted as unreadable; one at the cap keeps them all.
+func TestTrustPrincipalCap(t *testing.T) {
+	names := func(n int) string {
+		var ps []string
+		for i := 0; i < n; i++ {
+			ps = append(ps, fmt.Sprintf(`"arn:aws:iam::111111111111:role/r%d"`, i))
+		}
+		return `{"AWS":[` + strings.Join(ps, ",") + `]}`
+	}
+	res := build(t, []Read{stateRead(t, iamRoot,
+		roleResource(t, "atcap", policy(allow(names(maxTrustPrincipals), ""))),
+		roleResource(t, "overcap", policy(allow(names(maxTrustPrincipals+1), ""))))})
+	if n := len(canAssume(t, res.Tables, "atcap")); n != maxTrustPrincipals {
+		t.Errorf("at the cap: %d edges", n)
+	}
+	if es := canAssume(t, res.Tables, "overcap"); len(es) != 0 {
+		t.Errorf("over the cap: %d edges", len(es))
+	}
+	if !strings.Contains(res.Limits, "1 roles have a trust policy that could not be read") {
+		t.Errorf("limits: %s", res.Limits)
+	}
+	for _, n := range res.Tables.Nodes {
+		if n.Kind == snapshot.KindExternal && n.NativeID == "arn:aws:iam::111111111111:role/r"+fmt.Sprint(maxTrustPrincipals) {
+			t.Errorf("a principal of the capped role has a node: %+v", n)
+		}
 	}
 }
