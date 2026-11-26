@@ -3,7 +3,7 @@
 A snapshot is one immutable folder that says what exists, what Terraform manages and what depends on what, with no attribute values. This page is the map of the format; the schemas under [`schemas/`](../schemas/README.md) are the contract, and [architecture.md](architecture.md#the-snapshot) says how the writer works.
 
 ```text
-20261125T101500Z-56eda5cee850/
+20261125T101500Z-5343debee8ce/
   manifest.json
   nodes.parquet
   edges.parquet
@@ -34,7 +34,7 @@ The folder is named by the creation time (UTC) and the first twelve characters o
 
 Three Parquet files, each row described by a schema ([schemas/README.md](../schemas/README.md)):
 
-- **`nodes`** ([`node-v1`](../schemas/node-v1.schema.json)): one row per real thing. `kind` is `resource`, `module_call`, `state_root`, `account` or `external` (a placeholder for something referenced but not read). A node has its cloud, account, region, Terraform and inventory type, native ID, ARN or path, name, Terraform address, module and root, whether Terraform manages it (`managed`, `other_iac`, `unmanaged` or `unknown`), its environment, its tags, a confidence and the source it came from.
+- **`nodes`** ([`node-v1`](../schemas/node-v1.schema.json)): one row per real thing. `kind` is `resource`, `module_call`, `state_root`, `account` or `external` (a placeholder for something referenced but not read). A node has its cloud, account, region, Terraform and inventory type, native ID, ARN or path, name, Terraform address, module and root, whether Terraform manages it (`managed`, `other_iac`, `unmanaged`, `unknown`, or `missing`: a state holds it and an inventory that listed its place in full, with no filter and the type among those it says it listed in full, does not, see [inventory.md](inventory.md#missing-resources)), its environment, its tags, a confidence and the source it came from.
 - **`edges`** ([`edge-v1`](../schemas/edge-v1.schema.json)): a typed link from one node to another with its confidence and its basis. It reads from refers to, or depends on, to. The kinds written are `depends_on`, `contained_in`, `defined_in` and `reads_state_of`; the set is open, and a reader accepts a kind it does not know.
 - **`sources`** ([`source-v1`](../schemas/source-v1.schema.json)): where facts came from and when: a state (backend, location, workspace, serial, lineage, Terraform version) or an inventory file, the hash of what was kept of it, the time it was read, the collector and its status.
 
@@ -65,7 +65,7 @@ So a resource keeps its `node_id` as long as its identity does, and `diff` joins
 
 ## Versioning
 
-The major version is in the format name and the schema names. Within a major, a change only adds: columns, node and edge kinds, manifest members. A reader rejects a higher major, and accepts a column or kind it does not know. `format_minor` counts the additions.
+The major version is in the format name and the schema names. Within a major, a change only adds: columns, node and edge kinds, manifest members. A reader rejects a higher major, and accepts a column or kind it does not know. `format_minor` counts the additions: 1 added the `missing` status of `managed_status` (a reader that does not know it must accept it, as it accepts a kind it does not know). A snapshot has no `drifted` status: drift needs attribute values, which a snapshot never holds (see [inventory.md](inventory.md#missing-resources)).
 
 ## What is never in a snapshot
 

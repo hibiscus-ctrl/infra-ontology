@@ -27,7 +27,7 @@ import (
 var estate = filepath.Join("..", "snapshot", "testdata", "golden", "estate")
 
 const (
-	estateID = "56eda5cee85096e7c09c20074c7f7f315519b1f66ab23ab06c0695167a88afbc"
+	estateID = "5343debee8ce268ed61bde80a0e6a29b6d6bf770674cadf08a77d2961397cb28"
 	// The prod VPC of the fixture: the subnet, the instance and a module
 	// call depend on it.
 	prodVPC    = "561eee651d9be57a4c2ecc6e3f0c4fbe1839cfe9ed35c2ccb56d8904ea127749"

@@ -19,7 +19,7 @@ Some of these may be switched off: use the ones you are given.
 ## How to ask
 
 - **Before changing a resource,** call `blast_radius` on it. A `status` of `ambiguous` means the address matches several nodes (the same address in two accounts or environments): pick one from `targets` and call again with its `node_id`. `not_found` means this snapshot does not hold it, not that it does not exist.
-- **To find what Terraform does not manage,** call `inventory` with the types you care about and look at `managed_status`: `managed`, `unmanaged` or `other_iac`. The stored query `unmanaged` (`query` with `stored`) lists the unmanaged resources.
+- **To find what Terraform does not manage,** call `inventory` with the types you care about and look at `managed_status`: `managed`, `unmanaged`, `other_iac`, or `missing` (in a state, but absent from a complete live listing). The stored query `unmanaged` (`query` with `stored`) lists the unmanaged resources.
 - **In SQL,** the tables are `nodes`, `edges`, `sources` and `snapshot`. An edge runs from a node to what it needs. `blast(node_id, depth)` returns what depends on a node and `cone(node_id, depth)` what a node needs. Only one `SELECT` or `WITH ... SELECT` is accepted. A refusal says what was refused: change the query, do not retry it unchanged. Write an `ORDER BY` when the answer will be cited or paged.
 - **Keep it small.** Ask for the columns and rows you need. Results are capped at 1,000 rows and 256 KiB.
 

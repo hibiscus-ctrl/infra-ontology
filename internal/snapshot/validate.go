@@ -14,7 +14,7 @@ var (
 	hexID     = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	codeName  = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 	nodeKinds = set(KindResource, KindModuleCall, KindStateRoot, KindAccount, KindExternal)
-	managed   = set(Managed, OtherIaC, Unmanaged, Unknown)
+	managed   = set(Managed, OtherIaC, Unmanaged, Unknown, Missing)
 	confs     = set(Observed, Computed, Inferred)
 	srcKinds  = set(SourceState, SourceInventory, SourcePlan)
 	statuses  = set(StatusOK, StatusPartial, StatusFailed)

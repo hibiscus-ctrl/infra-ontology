@@ -14,7 +14,7 @@ const Format = "infra-ontology/snapshot/v1"
 
 // FormatMinor is the minor version this package writes. Within a major,
 // changes only add columns, kinds and members.
-const FormatMinor = 0
+const FormatMinor = 1
 
 // File names inside a snapshot folder.
 const (
@@ -43,6 +43,9 @@ const (
 	OtherIaC  = "other_iac"
 	Unmanaged = "unmanaged"
 	Unknown   = "unknown"
+	// Missing is a resource a state holds that an inventory which listed its
+	// type, account and region in full does not list (format minor 1).
+	Missing = "missing"
 )
 
 // Confidence values of a node or an edge.

@@ -11,8 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -48,10 +50,68 @@ type Inventory struct {
 	AllTagsDropped bool
 	// Failed is how many resources the run behind the document could not
 	// import (inventory/v1 counts them; an OCSF inventory does not).
-	Failed    int
+	Failed int
+	// Scopes are the scopes the document says it lists (provider, account
+	// and region, such as aws/123456789012/eu-west-2), and Coverage how
+	// complete its listing of them was. Coverage is nil for a document that
+	// does not say (an OCSF inventory, or an inventory/v1 without it).
+	Scopes   []string
+	Coverage *Coverage
+	// Filters says which kinds of filter narrowed the listing of any scope. It
+	// is nil for a document that does not say (one an earlier release wrote),
+	// which is taken as narrowed.
+	Filters   *Filters
 	Resources []Resource
 	// Digest is the SHA-256 of what is kept of the document.
 	Digest string
+}
+
+// Coverage is what an inventory/v1 document says of what its run could not
+// list or left out: the resources it failed to read, skipped, left out of the
+// import (excluded by its selection, or left out of the output), in all, by
+// scope and by type. Only these counts are kept: nothing of a resource's
+// values is in them. A document that does not give the totals, the types and
+// the scopes has no Coverage (see parseInventoryV1).
+type Coverage struct {
+	Totals Counts
+	// Scopes and Types are keyed by the scope and by the Terraform type as
+	// the document writes them.
+	Scopes, Types map[string]Counts
+	// ScopeDone and TypeDone say what the document calls a complete listing:
+	// of a scope (and the types listed in full in it, those it found none of
+	// too), and of a type (in every scope listed). Absent is not complete.
+	ScopeDone map[string]ScopeDone
+	TypeDone  map[string]bool
+}
+
+// ScopeDone is a scope whose document says it was listed in full, and the
+// types listed in full in it.
+type ScopeDone struct {
+	Complete bool
+	Types    map[string]bool
+}
+
+// Filters are the kinds of filter that narrow a listing: --id, --tag, --where,
+// --services or --skip, a provider scope of one group, and a listing in part.
+// A kind the document does not give is true: it does not say it was not used.
+type Filters struct{ ID, Tag, Where, Services, Group, Partial bool }
+
+// Any says some kind of filter narrowed the listing.
+func (f Filters) Any() bool {
+	return f.ID || f.Tag || f.Where || f.Services || f.Group || f.Partial
+}
+
+// Counts are the resources of a part of a listing that could not be read
+// (Failed), that the run skipped (Skipped), that its selection left out
+// (Excluded), or that it left out of the import (LeftOut). A listing with none
+// is complete: the run looked at every resource there and imported or listed
+// it.
+type Counts struct{ Failed, Skipped, Excluded, LeftOut int }
+
+// Complete says no resource of the part was failed, skipped, excluded or
+// left out.
+func (c Counts) Complete() bool {
+	return c.Failed == 0 && c.Skipped == 0 && c.Excluded == 0 && c.LeftOut == 0
 }
 
 // Resource is one resource of an inventory.
@@ -146,7 +206,8 @@ type inventoryV1 struct {
 		Name    string `json:"name"`
 		Version string `json:"version"`
 	} `json:"tool"`
-	Cloud     string `json:"cloud"`
+	Cloud     string   `json:"cloud"`
+	Scopes    []string `json:"scopes"`
 	Resources []struct {
 		Type        string            `json:"type"`
 		ID          string            `json:"id"`
@@ -158,11 +219,31 @@ type inventoryV1 struct {
 		Tags        map[string]string `json:"tags"`
 	} `json:"resources"`
 	Redaction redactionV1 `json:"redaction"`
-	Coverage  struct {
-		Totals struct {
-			Failed int `json:"failed"`
-		} `json:"totals"`
+	Coverage  *struct {
+		Totals *countsV1 `json:"totals"`
+		Types  []struct {
+			Type     string   `json:"type"`
+			Counts   countsV1 `json:"counts"`
+			Complete *bool    `json:"complete"`
+		} `json:"types"`
+		Scopes []struct {
+			Scope         string   `json:"scope"`
+			Counts        countsV1 `json:"counts"`
+			Complete      *bool    `json:"complete"`
+			CompleteTypes []string `json:"complete_types"`
+		} `json:"scopes"`
 	} `json:"coverage"`
+	Filters *struct {
+		ID, Tag, Where, Services, Group, Partial *bool
+	} `json:"filters"`
+}
+
+// countsV1 is the part of a document's counts this package reads.
+type countsV1 struct {
+	Failed   int `json:"failed"`
+	Skipped  int `json:"skipped"`
+	Excluded int `json:"excluded"`
+	LeftOut  int `json:"left_out"`
 }
 
 func parseInventoryV1(raw []byte) (Inventory, error) {
@@ -181,7 +262,35 @@ func parseInventoryV1(raw []byte) (Inventory, error) {
 	inv := Inventory{
 		Tool: d.Tool.Name, ToolVersion: d.Tool.Version, GeneratedAt: at.UTC(),
 		IDsHashed: d.Redaction.IDsHashed, TagKeysDropped: d.Redaction.TagKeysDropped,
-		AllTagsDropped: d.Redaction.AllTagsDropped, Failed: d.Coverage.Totals.Failed,
+		AllTagsDropped: d.Redaction.AllTagsDropped, Scopes: d.Scopes,
+	}
+	if d.Coverage != nil && d.Coverage.Totals != nil {
+		inv.Failed = d.Coverage.Totals.Failed
+	}
+	// A document that lacks the totals, the types or the scopes, such as
+	// "coverage":{}, does not say how complete its listing was: it has no
+	// Coverage, rather than one that counts nothing.
+	if c := d.Coverage; c != nil && c.Totals != nil && c.Types != nil && c.Scopes != nil {
+		inv.Coverage = &Coverage{
+			Totals: Counts(*c.Totals), Scopes: make(map[string]Counts, len(c.Scopes)), Types: make(map[string]Counts, len(c.Types)),
+		}
+		inv.Coverage.ScopeDone, inv.Coverage.TypeDone = map[string]ScopeDone{}, map[string]bool{}
+		for _, s := range c.Scopes {
+			inv.Coverage.Scopes[s.Scope] = addCounts(inv.Coverage.Scopes[s.Scope], Counts(s.Counts))
+			inv.Coverage.mergeScopeDone(s.Scope, s.Complete, s.CompleteTypes)
+		}
+		for _, t := range c.Types {
+			inv.Coverage.Types[t.Type] = addCounts(inv.Coverage.Types[t.Type], Counts(t.Counts))
+			_, seen := inv.Coverage.TypeDone[t.Type]
+			inv.Coverage.TypeDone[t.Type] = t.Complete != nil && *t.Complete && (!seen || inv.Coverage.TypeDone[t.Type])
+		}
+	}
+	if f := d.Filters; f != nil {
+		// A kind the document leaves out is not known to be unused.
+		used := func(b *bool) bool { return b == nil || *b }
+		inv.Filters = &Filters{
+			ID: used(f.ID), Tag: used(f.Tag), Where: used(f.Where), Services: used(f.Services), Group: used(f.Group), Partial: used(f.Partial),
+		}
 	}
 	for i, r := range d.Resources {
 		if r.Type == "" || r.ID == "" {
@@ -196,6 +305,40 @@ func parseInventoryV1(raw []byte) (Inventory, error) {
 		})
 	}
 	return inv, nil
+}
+
+// mergeScopeDone notes what the document says of the completeness of a scope.
+// A scope it names twice is complete only where both say so, in the types
+// both name.
+func (c *Coverage) mergeScopeDone(scope string, complete *bool, types []string) {
+	d := ScopeDone{Complete: complete != nil && *complete, Types: make(map[string]bool, len(types))}
+	for _, t := range types {
+		d.Types[t] = true
+	}
+	if prev, ok := c.ScopeDone[scope]; ok {
+		d.Complete = d.Complete && prev.Complete
+		for t := range d.Types {
+			if !prev.Types[t] {
+				delete(d.Types, t)
+			}
+		}
+	}
+	c.ScopeDone[scope] = d
+}
+
+func addCounts(a, b Counts) Counts {
+	return Counts{a.Failed + b.Failed, a.Skipped + b.Skipped, a.Excluded + b.Excluded, a.LeftOut + b.LeftOut}
+}
+
+// countFields are the counts of c, as the digest has them.
+func countFields(c Counts) []string {
+	f := []string{strconv.Itoa(c.Failed), strconv.Itoa(c.Skipped)}
+	if c.Excluded > 0 || c.LeftOut > 0 {
+		// Only when counted, so that the digest of a document that counts neither
+		// is what it was.
+		f = append(f, strconv.Itoa(c.Excluded), strconv.Itoa(c.LeftOut))
+	}
+	return f
 }
 
 // knownAccount is the account of a resource, "" where infraharvest could not
@@ -321,6 +464,29 @@ func digestOf(inv Inventory) string {
 		h.Write([]byte{'\n'})
 	}
 	w(inv.Schema, inv.Tool, inv.ToolVersion, inv.GeneratedAt.Format(time.RFC3339))
+	if inv.Coverage != nil {
+		// What the listing could not read decides what its absences mean, so
+		// a change to it changes the digest.
+		c := inv.Coverage
+		w(append([]string{"coverage"}, countFields(c.Totals)...)...)
+		for _, scope := range slices.Sorted(maps.Keys(inv.Coverage.Scopes)) {
+			w(append([]string{"scope", scope}, countFields(c.Scopes[scope])...)...)
+		}
+		for _, typ := range slices.Sorted(maps.Keys(inv.Coverage.Types)) {
+			w(append([]string{"type", typ}, countFields(c.Types[typ])...)...)
+		}
+		for _, scope := range slices.Sorted(maps.Keys(c.ScopeDone)) {
+			d := c.ScopeDone[scope]
+			w(append([]string{"scope-done", scope, fmt.Sprint(d.Complete)}, slices.Sorted(maps.Keys(d.Types))...)...)
+		}
+		for _, typ := range slices.Sorted(maps.Keys(c.TypeDone)) {
+			w("type-done", typ, fmt.Sprint(c.TypeDone[typ]))
+		}
+		w(append([]string{"scopes"}, slices.Sorted(slices.Values(inv.Scopes))...)...)
+	}
+	if f := inv.Filters; f != nil {
+		w("filters", fmt.Sprint(f.ID, f.Tag, f.Where, f.Services, f.Group, f.Partial))
+	}
 	for _, r := range inv.Resources {
 		w(r.Cloud, r.Account, r.Region, r.Type, r.ID, r.CloudID, r.Name, r.Status, r.Basis, r.Address, r.Module, r.Root)
 		keys := make([]string, 0, len(r.Tags))
