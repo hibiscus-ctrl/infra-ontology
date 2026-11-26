@@ -102,6 +102,8 @@ jobs:
         run: go vet -tags noduckdb ./...
       - name: Test
         run: go test -tags noduckdb ./...
+        env:
+          INFRA_ONTOLOGY_NEED_COSIGN: "1"
       - name: Check nothing of the engine is linked
         run: |
           if go list -deps -tags noduckdb ./... | grep -iE 'duckdb|apache/arrow'; then

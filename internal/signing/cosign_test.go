@@ -21,10 +21,14 @@ import (
 // TestCosignVerifiesTheBundle checks what is written with the tool the
 // bundle is written for: `cosign verify-blob --bundle` over the manifest,
 // with the public key (no transparency log entry, as the bundle has none),
-// for each key type. It is skipped without cosign.
+// for each key type. It is skipped without cosign, unless
+// INFRA_ONTOLOGY_NEED_COSIGN is set, as CI sets it where cosign is installed.
 func TestCosignVerifiesTheBundle(t *testing.T) {
 	cosign, err := exec.LookPath("cosign")
 	if err != nil {
+		if os.Getenv("INFRA_ONTOLOGY_NEED_COSIGN") != "" {
+			t.Fatal("cosign is not on the PATH")
+		}
 		t.Skip("cosign is not on the PATH")
 	}
 	for _, kind := range []string{"p256", "p384", "p521", "ed25519", "rsa2048", "rsa3072"} {
