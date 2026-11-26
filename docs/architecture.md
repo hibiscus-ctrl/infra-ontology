@@ -19,7 +19,7 @@ flowchart LR
 
 ## The snapshot
 
-This part is written (`internal/snapshot`). A snapshot is one immutable folder, named by its creation time and the start of its id (`20261125T101500Z-56eda5cee850`):
+This part is written (`internal/snapshot`). A snapshot is one immutable folder, named by its creation time and the start of its id (`20261125T101500Z-5343debee8ce`):
 
 - `manifest.json`: the format (`infra-ontology/snapshot/v1`) and its minor version, the snapshot id, the parent snapshot's id, a label, the creation time, the tool, the status (`ok`, or `partial` if any source did not read in full), the name, SHA-256 and row count of each table, a summary of the sources, the redaction mode, what was covered and what could not be read, and a text of limits.
 - `nodes.parquet`: one row per real thing (a resource, a module call, a state root, an account, or a placeholder for something referenced but not read), with its kind, scope, type, identifiers, name, Terraform address, whether Terraform manages it, environment, tags and confidence.

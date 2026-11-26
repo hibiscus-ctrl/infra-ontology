@@ -132,6 +132,7 @@ func (b *builder) openInventories(reads []InventoryRead) []*invResource {
 		}
 		b.sources = append(b.sources, src)
 		b.inventories = append(b.inventories, inv)
+		b.listings[src.SourceID] = newListing(src.SourceID, inv, b.tm.Canonical)
 		for _, res := range inv.Resources {
 			b.mergeResource(merged, inv, src.SourceID, res)
 		}
@@ -156,6 +157,11 @@ func (b *builder) mergeResource(merged map[invKey]*invResource, inv Inventory, s
 	// them it cannot be placed.
 	if credentialLike(res.ID) || credentialLike(res.CloudID) || credentialLike(res.Type) {
 		b.credentialIDs++
+		// It may be the resource a state holds: nothing is missing from this
+		// listing.
+		if l := b.listings[source]; l != nil {
+			l.leftOut = true
+		}
 		return
 	}
 	for _, p := range []*string{&res.Name, &res.Address, &res.Module, &res.Root, &res.Account, &res.Region} {
@@ -185,6 +191,9 @@ func (b *builder) mergeResource(merged map[invKey]*invResource, inv Inventory, s
 	}
 	r.Account, r.Region = firstOf(sc.account, res.Account), firstOf(sc.region, res.Region)
 	k := invKey{res.Cloud, r.Account, r.tfType, sc.id}
+	if l := b.listings[source]; l != nil {
+		l.add(k, r.Region, sc.id, inv.IDsHashed)
+	}
 	old, ok := merged[k]
 	if !ok {
 		merged[k] = r
@@ -389,6 +398,7 @@ func (b *builder) addInventories(reads []InventoryRead) {
 		b.addInventoryNode(p.r)
 	}
 	b.inventoryEdges()
+	b.markMissing()
 }
 
 func (b *builder) nodeIDOf(r *invResource) string {
@@ -429,6 +439,7 @@ func (b *builder) join(id string, r *invResource) {
 	b.nodes[id] = n
 	b.invSource[id] = firstOf(b.invSource[id], r.source)
 	b.joined[id] = true
+	b.joinedKeys[id] = append(b.joinedKeys[id], invKey{r.Cloud, r.Account, r.tfType, r.sc.id})
 }
 
 // applyUpstreamDrops removes from the tags of a state's node what the export
@@ -607,8 +618,14 @@ func (b *builder) inventoryLimits() []string {
 		if n := b.claimedManaged; n > 0 {
 			s = append(s, fmt.Sprintf("%d resources are managed according to an inventory but are in none of the states read; they keep that status.", n))
 		}
+		if n := b.missing; n > 0 {
+			s = append(s, fmt.Sprintf("%d resources in the states read are marked missing: an inventory that lists their type in their account and region without a failed or skipped resource does not list them. That says they were not there when the inventory was made: one created after it shows as missing too (the inventory's time is in sources).", n))
+		}
 		if n := b.notInInventory(); n > 0 {
-			s = append(s, fmt.Sprintf("%d resources in the states read are not in the inventories, though these list their type and account: they may have been deleted, or not be listed. They stay managed.", n))
+			s = append(s, fmt.Sprintf("%d resources in the states read are not in the inventories, though these list their type and account: they may have been deleted, or not be listed, and no inventory lists their type in their account and region in full. They stay managed.", n))
+		}
+		if len(b.failedInventories) > 0 {
+			s = append(s, fmt.Sprintf("%d inventories could not be read, so no resource is marked missing: one of them may list it.", len(b.failedInventories)))
 		}
 	}
 	return s
@@ -642,7 +659,7 @@ func (b *builder) notInInventory() int {
 	count := 0
 	for _, id := range b.stateManaged {
 		n := b.nodes[id]
-		if b.joined[id] || !types[n.Cloud+"|"+n.TFType] {
+		if b.joined[id] || n.ManagedStatus == snapshot.Missing || !types[n.Cloud+"|"+n.TFType] {
 			continue
 		}
 		if n.Account == "" || accounts[n.Cloud][n.Account] {

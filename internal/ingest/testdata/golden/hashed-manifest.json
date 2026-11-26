@@ -1,7 +1,7 @@
 {
   "format": "infra-ontology/snapshot/v1",
-  "format_minor": 0,
-  "snapshot_id": "1eccaa5e3586d2b12925901d4c68329158ab89adf0b59b3e96eb8240adf84943",
+  "format_minor": 1,
+  "snapshot_id": "bebb9abc7edda67648d328bf301d7bc041e42d1fce3cbdbec1b0c1099395ffe6",
   "parent_id": "",
   "label": "fixture",
   "created_at": "2026-11-25T12:00:00Z",
@@ -21,14 +21,14 @@
     {
       "name": "nodes",
       "file": "nodes.parquet",
-      "sha256": "b2517d2230ce3e7eca7c0054884a294dbc63fc679449bf994f42a5591bdf8eed",
+      "sha256": "bbd563a1c730f11ea36562819c4ae90847e206477d77a9fdcc64466f31d9d3ba",
       "rows": 47,
       "schema": "infra-ontology/node/v1"
     },
     {
       "name": "sources",
       "file": "sources.parquet",
-      "sha256": "2885b422e7f2c57c435d6b2786859814dfbbb0bda924d932b799c0b7d41dd838",
+      "sha256": "d12ccf41ab19c71d7ef3e6a2f5edd5105f457957910e77306917b9795062cc61",
       "rows": 8,
       "schema": "infra-ontology/source/v1"
     }
@@ -91,5 +91,5 @@
     ],
     "failed_sources": []
   },
-  "limits": "Read from Terraform state and infraharvest inventories: a resource in both is managed, and one only in an inventory has the status its inventory gives it (unmanaged, unless the inventory knows who manages it). Attribute values and output values are never read: the only values kept from a resource are its id, ARN and its tags, less the tags that look like secrets. A resource in both has the tags of its inventory, or those of its state where the inventory has none. IDs, names, Terraform addresses and state locations are HMAC-SHA256 hashes under a key this snapshot does not hold; types, accounts, regions and counts are readable. 2 states read by terraform_remote_state are not in this snapshot, so anything that depends on them stops at an external placeholder. 1 terraform_remote_state data sources use a backend whose settings name no state this reader can place, so they point to a placeholder. 1 dependencies name an address the state does not hold and are left out. 1 tags look like secrets, or were dropped by request, and are not kept. 2 resources in the states read are not in the inventories, though these list their type and account: they may have been deleted, or not be listed. They stay managed."
+  "limits": "Read from Terraform state and infraharvest inventories: a resource in both is managed, and one only in an inventory has the status its inventory gives it (unmanaged, unless the inventory knows who manages it). Attribute values and output values are never read: the only values kept from a resource are its id, ARN and its tags, less the tags that look like secrets. A resource in both has the tags of its inventory, or those of its state where the inventory has none. IDs, names, Terraform addresses and state locations are HMAC-SHA256 hashes under a key this snapshot does not hold; types, accounts, regions and counts are readable. 2 states read by terraform_remote_state are not in this snapshot, so anything that depends on them stops at an external placeholder. 1 terraform_remote_state data sources use a backend whose settings name no state this reader can place, so they point to a placeholder. 1 dependencies name an address the state does not hold and are left out. 1 tags look like secrets, or were dropped by request, and are not kept. 1 resources in the states read are marked missing: an inventory that lists their type in their account and region without a failed or skipped resource does not list them. That says they were not there when the inventory was made: one created after it shows as missing too (the inventory's time is in sources). 1 resources in the states read are not in the inventories, though these list their type and account: they may have been deleted, or not be listed, and no inventory lists their type in their account and region in full. They stay managed."
 }

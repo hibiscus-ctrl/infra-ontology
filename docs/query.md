@@ -99,7 +99,7 @@ Every answer is printed with, and `--json` returns, a record that matches [`sche
   "query_hash": "sha256:...",
   "stored_query": "blast", "stored_query_version": 1, "stored_query_hash": "sha256:...",
   "parameters": {"node": "module.network", "depth": "3"},
-  "snapshot_id": "56eda5cee85096e7...",
+  "snapshot_id": "5343debee8ce268e...",
   "dialect": "infra-ontology/sql/v1",
   "engine": "duckdb 2.0.1",
   "caps": {"max_rows": 1000, "max_columns": 64, "max_bytes": 4194304},

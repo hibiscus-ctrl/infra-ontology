@@ -123,7 +123,7 @@ func BuildAll(reads []Read, invs []InventoryRead, o Options) (Result, error) {
 		hashedTagFilter: secretscan.NewTagFilter(o.DropTags, o.DropAllTags, nil),
 		invSource:       map[string]string{}, joined: map[string]bool{},
 		key: o.HashKey, raw: map[string]rawID{}, preHashed: map[string]bool{},
-		mismatched: map[string]bool{},
+		mismatched: map[string]bool{}, listings: map[string]*listing{}, joinedKeys: map[string][]invKey{},
 	}
 	var docs []tfstate.Document
 	for _, r := range reads {
@@ -220,7 +220,13 @@ type builder struct {
 	// came from an inventory that hashed them already (see hashField).
 	// mismatched holds the hashed inventories that matched nothing in the
 	// states although they list resources of the same types and accounts.
-	key        []byte
+	key []byte
+	// listings is what each inventory read lists, by source, and joinedKeys
+	// the inventory resources each node of a state was joined to (see
+	// markMissing).
+	listings   map[string]*listing
+	joinedKeys map[string][]invKey
+	missing    int
 	raw        map[string]rawID
 	preHashed  map[string]bool
 	mismatched map[string]bool

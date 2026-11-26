@@ -61,8 +61,8 @@
       "type": "string"
     },
     "managed_status": {
-      "description": "Whether Terraform manages the thing.",
-      "enum": ["managed", "other_iac", "unmanaged", "unknown"]
+      "description": "Whether Terraform manages the thing. missing (format minor 1) is a resource a state holds that an inventory which listed its type, account and region in full does not list.",
+      "enum": ["managed", "other_iac", "unmanaged", "unknown", "missing"]
     },
     "environment": {
       "description": "The environment the node belongs to, for example prod or staging, where known.",

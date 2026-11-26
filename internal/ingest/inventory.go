@@ -11,8 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -48,11 +50,36 @@ type Inventory struct {
 	AllTagsDropped bool
 	// Failed is how many resources the run behind the document could not
 	// import (inventory/v1 counts them; an OCSF inventory does not).
-	Failed    int
+	Failed int
+	// Scopes are the scopes the document says it lists (provider, account
+	// and region, such as aws/123456789012/eu-west-2), and Coverage how
+	// complete its listing of them was. Coverage is nil for a document that
+	// does not say (an OCSF inventory, or an inventory/v1 without it).
+	Scopes    []string
+	Coverage  *Coverage
 	Resources []Resource
 	// Digest is the SHA-256 of what is kept of the document.
 	Digest string
 }
+
+// Coverage is what an inventory/v1 document says of what its run could not
+// list: the resources it failed to read and the ones it skipped, in all, by
+// scope and by type. Only these two counts are kept: nothing of a resource's
+// values is in them.
+type Coverage struct {
+	Totals Counts
+	// Scopes and Types are keyed by the scope and by the Terraform type as
+	// the document writes them.
+	Scopes, Types map[string]Counts
+}
+
+// Counts are the resources of a part of a listing that could not be read
+// (Failed) or that the run skipped (Skipped). A listing with neither is
+// complete.
+type Counts struct{ Failed, Skipped int }
+
+// Complete says no resource of the part was failed or skipped.
+func (c Counts) Complete() bool { return c.Failed == 0 && c.Skipped == 0 }
 
 // Resource is one resource of an inventory.
 type Resource struct {
@@ -146,7 +173,8 @@ type inventoryV1 struct {
 		Name    string `json:"name"`
 		Version string `json:"version"`
 	} `json:"tool"`
-	Cloud     string `json:"cloud"`
+	Cloud     string   `json:"cloud"`
+	Scopes    []string `json:"scopes"`
 	Resources []struct {
 		Type        string            `json:"type"`
 		ID          string            `json:"id"`
@@ -158,11 +186,23 @@ type inventoryV1 struct {
 		Tags        map[string]string `json:"tags"`
 	} `json:"resources"`
 	Redaction redactionV1 `json:"redaction"`
-	Coverage  struct {
-		Totals struct {
-			Failed int `json:"failed"`
-		} `json:"totals"`
+	Coverage  *struct {
+		Totals countsV1 `json:"totals"`
+		Types  []struct {
+			Type   string   `json:"type"`
+			Counts countsV1 `json:"counts"`
+		} `json:"types"`
+		Scopes []struct {
+			Scope  string   `json:"scope"`
+			Counts countsV1 `json:"counts"`
+		} `json:"scopes"`
 	} `json:"coverage"`
+}
+
+// countsV1 is the part of a document's counts this package reads.
+type countsV1 struct {
+	Failed  int `json:"failed"`
+	Skipped int `json:"skipped"`
 }
 
 func parseInventoryV1(raw []byte) (Inventory, error) {
@@ -181,7 +221,19 @@ func parseInventoryV1(raw []byte) (Inventory, error) {
 	inv := Inventory{
 		Tool: d.Tool.Name, ToolVersion: d.Tool.Version, GeneratedAt: at.UTC(),
 		IDsHashed: d.Redaction.IDsHashed, TagKeysDropped: d.Redaction.TagKeysDropped,
-		AllTagsDropped: d.Redaction.AllTagsDropped, Failed: d.Coverage.Totals.Failed,
+		AllTagsDropped: d.Redaction.AllTagsDropped, Scopes: d.Scopes,
+	}
+	if c := d.Coverage; c != nil {
+		inv.Failed = c.Totals.Failed
+		inv.Coverage = &Coverage{
+			Totals: Counts(c.Totals), Scopes: make(map[string]Counts, len(c.Scopes)), Types: make(map[string]Counts, len(c.Types)),
+		}
+		for _, s := range c.Scopes {
+			inv.Coverage.Scopes[s.Scope] = addCounts(inv.Coverage.Scopes[s.Scope], Counts(s.Counts))
+		}
+		for _, t := range c.Types {
+			inv.Coverage.Types[t.Type] = addCounts(inv.Coverage.Types[t.Type], Counts(t.Counts))
+		}
 	}
 	for i, r := range d.Resources {
 		if r.Type == "" || r.ID == "" {
@@ -197,6 +249,8 @@ func parseInventoryV1(raw []byte) (Inventory, error) {
 	}
 	return inv, nil
 }
+
+func addCounts(a, b Counts) Counts { return Counts{a.Failed + b.Failed, a.Skipped + b.Skipped} }
 
 // knownAccount is the account of a resource, "" where infraharvest could not
 // tell it (it writes "unknown").
@@ -321,6 +375,19 @@ func digestOf(inv Inventory) string {
 		h.Write([]byte{'\n'})
 	}
 	w(inv.Schema, inv.Tool, inv.ToolVersion, inv.GeneratedAt.Format(time.RFC3339))
+	if inv.Coverage != nil {
+		// What the listing could not read decides what its absences mean, so
+		// a change to it changes the digest.
+		c := inv.Coverage
+		w("coverage", strconv.Itoa(c.Totals.Failed), strconv.Itoa(c.Totals.Skipped))
+		for _, scope := range slices.Sorted(maps.Keys(inv.Coverage.Scopes)) {
+			w("scope", scope, strconv.Itoa(c.Scopes[scope].Failed), strconv.Itoa(c.Scopes[scope].Skipped))
+		}
+		for _, typ := range slices.Sorted(maps.Keys(inv.Coverage.Types)) {
+			w("type", typ, strconv.Itoa(c.Types[typ].Failed), strconv.Itoa(c.Types[typ].Skipped))
+		}
+		w(append([]string{"scopes"}, slices.Sorted(slices.Values(inv.Scopes))...)...)
+	}
 	for _, r := range inv.Resources {
 		w(r.Cloud, r.Account, r.Region, r.Type, r.ID, r.CloudID, r.Name, r.Status, r.Basis, r.Address, r.Module, r.Root)
 		keys := make([]string, 0, len(r.Tags))

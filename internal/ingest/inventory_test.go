@@ -105,7 +105,15 @@ func TestInventoryResourcesJoinTheStateNodes(t *testing.T) {
 	if n := resourceNode(t, tb, "aws_db_instance", "db-ABCDEFG"); n.ManagedStatus != snapshot.Managed || n.InventoryType != "" {
 		t.Errorf("db: %+v", n)
 	}
-	if !strings.Contains(res.Limits, "2 resources in the states read are not in the inventories") {
+	if !strings.Contains(res.Limits, "1 resources in the states read are not in the inventories") {
+		t.Errorf("limits: %s", res.Limits)
+	}
+	// The listing of its scope is complete, lists its type, and lists the
+	// instance beside it: the second instance of the state is gone.
+	if n := resourceNode(t, tb, "aws_instance", "i-0e40"); n.ManagedStatus != snapshot.Missing || n.Confidence != snapshot.Computed || n.Address == "" {
+		t.Errorf("instance no listing has: %+v", n)
+	}
+	if !strings.Contains(res.Limits, "1 resources in the states read are marked missing") {
 		t.Errorf("limits: %s", res.Limits)
 	}
 	// Nothing joined makes a second node: the nodes added are the ones only

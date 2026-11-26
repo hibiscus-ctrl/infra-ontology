@@ -33,9 +33,10 @@ A resource of an inventory is the same thing as a node a state produced when the
 | --- | --- | --- |
 | in a state and in an inventory | `managed`, whatever the inventory says: the inventory of a `discover` run lists everything as unmanaged, as it reads no state | `observed` |
 | only in an inventory | the status the inventory gives it: `unmanaged`, `other_iac` (CloudFormation or another tool) or `managed` (a state infraharvest read that was not given here) | `observed`; `inferred` when the inventory says it is managed because of Terraform's tags and not a state |
-| only in a state | `managed`, as before | `observed` |
+| only in a state, and an inventory that listed its place in full does not list it | `missing` | `computed` |
+| only in a state, otherwise | `managed`, as before | `observed` |
 
-The plan has four statuses and no `missing` or `drifted`, so a resource in a state that no inventory lists stays `managed`. A resource cannot be called gone because an inventory does not list it: the inventory may not cover its type, its account or its region. The manifest's `limits` counts them instead: the resources of the states read that are not in the inventories, where an inventory lists their type in their account.
+A resource a state holds that no inventory lists stays `managed` unless an inventory can say it is gone: see [Missing resources](#missing-resources). The manifest's `limits` counts the ones that stay `managed` where an inventory lists their type in their account.
 
 An inventory that hashes its IDs (`infraharvest export --hash-ids`) is matched to state when the snapshot is built with `--hash-ids` and the same key ([docs/state.md](state.md#hashing-ids)): the build hashes the IDs and ARNs the states hold, as infraharvest does, and joins the two by hash. What is joined is the same as for an inventory that is not hashed, and what only the inventory lists keeps the status it gives it. Three things limit this:
 
@@ -46,6 +47,22 @@ An inventory that hashes its IDs (`infraharvest export --hash-ids`) is matched t
 Inventories that are not hashed are matched in the clear whatever `--hash-ids` says, and their IDs, names, addresses and paths are hashed as the snapshot is written.
 
 A resource listed by more than one document is one node: it keeps the status that knows most (`managed`, then `other_iac`, then `unmanaged`) and what each document gives.
+
+## Missing resources
+
+`missing` is a node a state holds that no inventory lists, where an inventory could have: a state resource is marked `missing` only when all of these hold for one inventory, and otherwise it stays `managed`, which proves nothing either way.
+
+1. The inventory is an `infraharvest/inventory/v1` document, which says how complete its listing was. An OCSF inventory does not, so it never marks anything missing.
+2. No import failed (`coverage.totals.failed` is 0), no resource of it was left out of the snapshot for its ID, and, if it hashes its IDs, the snapshot was built with `--hash-ids` and its key and the inventory matched the states.
+3. Every scope of the document that is the resource's cloud, account and region (`aws/123456789012/eu-west-2`) has no failed or skipped resource in `coverage.scopes` (in `coverage.totals`, for a document that gives no counts for the scope), and neither does the resource's type in `coverage.types`. Azure resource IDs have no region, so for Azure the account (the subscription) is the scope, and the inventory must also list some resource in the same resource group: a listing of one group says nothing of another.
+4. The document lists at least one resource of that type in that account and region (a type it lists none of may be one it does not list at all), and it lists, and so joins to the state, at least one resource of the type in that account: if none joins, the IDs of the type may not compare between state and inventory.
+5. The resource has an account and, outside Azure, a region. Joins are the ones in [Joining to state](#joining-to-state), so Azure IDs that differ only in case are one resource and are not missing.
+
+If any inventory file could not be read, nothing is marked `missing`: the one that failed may list the resource. The node keeps its address, ID, tags and source; its `confidence` is `computed`, not `observed`, since the status comes from an absence.
+
+`missing` says the resource was not in the listing when the inventory was made (its time is in `sources`). A resource created after the inventory also shows as missing, so build the inventory and the state close together. A listing infraharvest made with filters (`--id`, `--tag`, `--where`) is not marked in the document, apart from the Azure resource group rule above: use inventories of whole scopes.
+
+**`drifted` is not a status.** Whether a live resource differs from its state needs the resource's attributes on both sides, and a snapshot never holds an attribute value. Comparing only tags would call a resource drifted when the cloud added a tag or a provider's default tags differ, and say nothing of the rest, so the format does not offer it. Use `terraform plan`, or `infraharvest drift`, for that.
 
 ## Edges
 
@@ -75,7 +92,7 @@ Each file is a `sources` row of kind `inventory`: backend `file`, its path, `col
 
 ## What it cannot tell you
 
-`limits` says, in plain text, that the snapshot was read from state and inventories, from inventories only, or from state only; how many inventory resources were left out for their ID and how many tags were dropped; how many inventories hash their IDs; how many resources an inventory calls managed that are in none of the states read; and how many resources of the states are not in the inventories.
+`limits` says, in plain text, that the snapshot was read from state and inventories, from inventories only, or from state only; how many inventory resources were left out for their ID and how many tags were dropped; how many inventories hash their IDs; how many resources an inventory calls managed that are in none of the states read; how many resources of the states are marked missing; how many are not in the inventories though one lists their type and account, and stay managed; and how many inventories could not be read, so that none is marked missing.
 
 - Without an ARN, a resource that is only in an inventory has a `node_id` from its account and region as the inventory gives them, which may not be the one a state later gives it: such a resource shows in a `diff` as removed and added when a state starts to hold it, not as changed. Ask for the ARN in the OCSF inventory, where infraharvest knows it.
 - A joined node cites its state as its source. The inventory that listed it is the source of its edges, and its `document_sha256` and time are in `sources`.

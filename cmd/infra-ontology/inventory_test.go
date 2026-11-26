@@ -66,7 +66,7 @@ func TestBuildFromStateAndInventory(t *testing.T) {
 		t.Errorf("manifest: %+v", l.Manifest)
 	}
 	counts := statusCounts(l)
-	if counts[snapshot.Managed] != 18 || counts[snapshot.Unmanaged] != 9 || counts[snapshot.OtherIaC] != 1 {
+	if counts[snapshot.Managed] != 17 || counts[snapshot.Missing] != 1 || counts[snapshot.Unmanaged] != 9 || counts[snapshot.OtherIaC] != 1 {
 		t.Errorf("statuses: %v", counts)
 	}
 	if !strings.Contains(l.Manifest.Limits, "Read from Terraform state and infraharvest inventories") ||

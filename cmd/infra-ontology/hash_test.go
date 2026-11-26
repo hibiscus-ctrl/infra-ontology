@@ -91,7 +91,7 @@ func TestHashIDsWritesAHashedSnapshot(t *testing.T) {
 		t.Errorf("no node with the hash of vpc-0a1b, %s", want)
 	}
 	counts := statusCounts(l)
-	if counts[snapshot.Managed] != 18 || counts[snapshot.Unmanaged] != 9 || counts[snapshot.OtherIaC] != 1 {
+	if counts[snapshot.Managed] != 17 || counts[snapshot.Missing] != 1 || counts[snapshot.Unmanaged] != 9 || counts[snapshot.OtherIaC] != 1 {
 		t.Errorf("statuses: %v", counts)
 	}
 
