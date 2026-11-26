@@ -297,7 +297,8 @@ func (v Verifier) trustedRoot() (root.TrustedMaterial, error) {
 
 // SignWithKey signs the snapshot in dir with the private key in keyFile and
 // writes manifest.sig.json beside the manifest. The key is a PEM ECDSA
-// (P-256, P-384 or P-521) key, in PKCS #8, SEC 1 or the encrypted
+// (P-256, P-384 or P-521), Ed25519 or RSA (2048, 3072 or 4096 bits; PKCS #1
+// v1.5 with SHA-256) key, in PKCS #8, SEC 1, PKCS #1 or the encrypted
 // form `cosign generate-key-pair` writes; password opens an encrypted key.
 // Nothing leaves the machine: the bundle holds the signature and the key's
 // hint, with no certificate and no transparency log entry.

@@ -19,7 +19,7 @@ The bundle holds a signature over the bytes of `manifest.json`. Because the mani
 - change a table, and its hash no longer matches the manifest (`verify` fails);
 - change the manifest, even by a new line, and the signature no longer matches (`verify` fails).
 
-The bundle is a standard Sigstore message-signature bundle (`application/vnd.dev.sigstore.bundle.v0.3+json`) over the manifest file, the shape `cosign verify-blob --bundle manifest.sig.json ... manifest.json` reads, and `verify` applies the rules of that command. The tests check it with sigstore-go; they do not run cosign.
+The bundle is a standard Sigstore message-signature bundle (`application/vnd.dev.sigstore.bundle.v0.3+json`) over the manifest file, the shape `cosign verify-blob --bundle manifest.sig.json ... manifest.json` reads, and `verify` applies the rules of that command. The tests check it with sigstore-go, and with `cosign verify-blob` for each key type when `cosign` is on the path.
 
 **The signature file is not part of the snapshot.** It is not in the manifest's table list and not in the snapshot id, so adding, replacing or editing it cannot change the id, and `snapshot build` of the same rows still gives the same snapshot. A snapshot that is signed later is the same snapshot.
 
@@ -27,7 +27,7 @@ The bundle is a standard Sigstore message-signature bundle (`application/vnd.dev
 
 ## Signing with a key
 
-`--key FILE` takes a private key file: an ECDSA key (P-256, P-384 or P-521) as PEM, in PKCS #8 or SEC 1 form, or the encrypted key `cosign generate-key-pair` writes. An encrypted key's password is read from the environment variable `COSIGN_PASSWORD` (as cosign reads it); no flag takes a secret. The bundle holds the signature and a hint of the public key, with no certificate and no transparency log entry, and nothing leaves the machine.
+`--key FILE` takes a private key file: an ECDSA key (P-256, P-384 or P-521), an Ed25519 key or an RSA key (2048, 3072 or 4096 bits) as PEM, in PKCS #8 form (or SEC 1 for ECDSA, PKCS #1 for RSA), or the encrypted key `cosign generate-key-pair` writes. An encrypted key's password is read from the environment variable `COSIGN_PASSWORD` (as cosign reads it); no flag takes a secret. The bundle holds the signature and a hint of the public key, with no certificate and no transparency log entry, and nothing leaves the machine.
 
 ```sh
 openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out signing.key
@@ -35,7 +35,7 @@ openssl pkey -in signing.key -pubout -out signing.pub
 infra-ontology snapshot sign --key signing.key <snapshot-dir>
 ```
 
-Ed25519 and RSA keys are not supported. A Sigstore bundle over a message cannot carry a pure Ed25519 signature that sigstore-go verifies (the bundle has no digest algorithm for it), and cosign does not check Ed25519ph, so a bundle written with one would verify nowhere. The command says so and writes nothing.
+Each key type is signed the way `cosign verify-blob` checks it: ECDSA over the SHA-256 (P-256), SHA-384 (P-384) or SHA-512 (P-521) digest, RSA with PKCS #1 v1.5 over SHA-256, and Ed25519 over the manifest itself (the bundle still records the manifest's SHA-256 digest). A key of another size or type is refused, and nothing is written.
 
 ## Signing keyless
 

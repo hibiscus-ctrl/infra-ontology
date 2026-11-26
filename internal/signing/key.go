@@ -10,6 +10,7 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
@@ -86,12 +87,20 @@ func loadKeypair(raw, password []byte) (*keypair, error) {
 			return nil, fmt.Errorf("the curve %s is not supported: use P-256, P-384 or P-521", k.Curve.Params().Name)
 		}
 	case ed25519.PublicKey:
-		// A bundle over a message with a pure Ed25519 signature has no digest
-		// algorithm, and sigstore-go cannot check one; cosign does not check
-		// Ed25519ph. So no bundle we write would verify anywhere.
-		return nil, errors.New("Ed25519 keys are not supported: a Sigstore message-signature bundle cannot carry one that verifies; use an ECDSA key (P-256, P-384 or P-521)")
+		alg = protocommon.PublicKeyDetails_PKIX_ED25519
+	case *rsa.PublicKey:
+		switch k.N.BitLen() {
+		case 2048:
+			alg = protocommon.PublicKeyDetails_PKIX_RSA_PKCS1V15_2048_SHA256
+		case 3072:
+			alg = protocommon.PublicKeyDetails_PKIX_RSA_PKCS1V15_3072_SHA256
+		case 4096:
+			alg = protocommon.PublicKeyDetails_PKIX_RSA_PKCS1V15_4096_SHA256
+		default:
+			return nil, fmt.Errorf("a %d-bit RSA key is not supported: use 2048, 3072 or 4096 bits", k.N.BitLen())
+		}
 	default:
-		return nil, fmt.Errorf("a %T key is not supported: use an ECDSA key (P-256, P-384 or P-521)", signer.Public())
+		return nil, fmt.Errorf("a %T key is not supported: use an ECDSA (P-256, P-384 or P-521), Ed25519 or RSA (2048, 3072 or 4096 bits) key", signer.Public())
 	}
 	details, err := sigsig.GetAlgorithmDetails(alg)
 	if err != nil {
@@ -113,15 +122,29 @@ func isEncrypted(b *pem.Block) bool {
 	return x509.IsEncryptedPEMBlock(b) //nolint:staticcheck // legacy keys still exist
 }
 
-func (k *keypair) GetHashAlgorithm() protocommon.HashAlgorithm { return k.details.GetProtoHashType() }
+// GetHashAlgorithm is the algorithm of the digest the bundle records. A pure
+// Ed25519 signature is over the message itself, but the bundle still names
+// the digest of the message, and SHA-256 is the one sigstore-go and cosign
+// read it with.
+func (k *keypair) GetHashAlgorithm() protocommon.HashAlgorithm {
+	if k.details.GetKeyType() == sigsig.ED25519 {
+		return protocommon.HashAlgorithm_SHA2_256
+	}
+	return k.details.GetProtoHashType()
+}
 
 func (k *keypair) GetSigningAlgorithm() protocommon.PublicKeyDetails { return k.alg }
 
 func (k *keypair) GetHint() []byte { return k.hint }
 
 func (k *keypair) GetKeyAlgorithm() string {
-	if k.details.GetKeyType() == sigsig.ECDSA {
+	switch k.details.GetKeyType() {
+	case sigsig.ECDSA:
 		return "ECDSA"
+	case sigsig.RSA:
+		return "RSA"
+	case sigsig.ED25519:
+		return "ED25519"
 	}
 	return ""
 }
@@ -133,19 +156,25 @@ func (k *keypair) GetPublicKeyPem() (string, error) {
 	return string(b), err
 }
 
-// SignData returns the signature and the data it is over: a digest, except
-// for Ed25519, which hashes inside the signature.
+// SignData returns the signature and the digest of the data that the bundle
+// records. ECDSA and RSA (PKCS #1 v1.5) sign the digest; Ed25519 signs the
+// data itself, which is what `cosign verify-blob` checks it against.
 func (k *keypair) SignData(_ context.Context, data []byte) ([]byte, []byte, error) {
 	hf := k.details.GetHashType()
-	toSign := data
-	if hf != crypto.Hash(0) {
-		h := hf.New()
-		h.Write(data)
-		toSign = h.Sum(nil)
+	if hf == crypto.Hash(0) {
+		sig, err := k.signer.Sign(rand.Reader, data, hf)
+		if err != nil {
+			return nil, nil, err
+		}
+		sum := sha256.Sum256(data)
+		return sig, sum[:], nil
 	}
-	sig, err := k.signer.Sign(rand.Reader, toSign, hf)
+	h := hf.New()
+	h.Write(data)
+	digest := h.Sum(nil)
+	sig, err := k.signer.Sign(rand.Reader, digest, hf)
 	if err != nil {
 		return nil, nil, err
 	}
-	return sig, toSign, nil
+	return sig, digest, nil
 }
