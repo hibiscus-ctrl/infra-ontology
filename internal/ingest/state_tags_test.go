@@ -206,3 +206,36 @@ func TestInventoryTagsWinInTheFixtures(t *testing.T) {
 		t.Errorf("vpc tags %v, want %v", vpc.Tags, want)
 	}
 }
+
+func TestDataSourcesCarryNoTags(t *testing.T) {
+	extra := `,{"mode":"data","type":"aws_ami","name":"base","provider":"provider[\"registry.terraform.io/hashicorp/aws\"]",
+	  "instances":[{"attributes":{"id":"ami-0aa11bb2","tags":{"looked":"up"}}}]},
+	 {"mode":"managed","type":"aws_ami","name":"own","provider":"provider[\"registry.terraform.io/hashicorp/aws\"]",
+	  "instances":[{"attributes":{"id":"ami-0cc33dd4","tags":{"owned":"yes"}}}]}`
+	tb := build(t, tagReads(t, extra)).Tables
+	if got := nodeByAddress(t, tb, "data.aws_ami.base").Tags; len(got) != 0 {
+		t.Errorf("a data source has tags %v", got)
+	}
+	if got := nodeByAddress(t, tb, "aws_ami.own").Tags; !maps.Equal(got, map[string]string{"owned": "yes"}) {
+		t.Errorf("a managed resource has tags %v", got)
+	}
+}
+
+// A resource an inventory is joined to has the inventory's tags, and with
+// --drop-addresses the ones that hold its address, module path or Terraform
+// name go too (a name shorter than four characters is not looked for).
+func TestDropAddressesDropsJoinedInventoryTags(t *testing.T) {
+	inv := writeInventory(t, `
+	 {"type":"aws_instance","id":"i-0f00aa11","account":"111111111111","region":"eu-west-1","status":"managed","status_basis":"state",
+	  "tags":{"env":"live","ref":"AWS_INSTANCE.WEB","Name":"web-1"}}`)
+	o := opts
+	o.DropAddresses = true
+	res, err := BuildAll(tagReads(t, ""), inv, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	web := resourceNode(t, res.Tables, "aws_instance", "i-0f00aa11")
+	if want := map[string]string{"env": "live", "Name": "web-1"}; !maps.Equal(web.Tags, want) {
+		t.Errorf("joined instance: tags %v, want %v", web.Tags, want)
+	}
+}

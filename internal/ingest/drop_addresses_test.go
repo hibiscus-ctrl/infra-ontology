@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/IgnatG/infraharvest/pkg/tfstate"
+
 	"github.com/hibiscus-ctrl/infra-ontology/internal/snapshot"
 )
 
@@ -17,7 +19,7 @@ import (
 // were used for: the edges, the node IDs and the statuses. It works with a key
 // too.
 func TestDropAddressesLeavesNoAddress(t *testing.T) {
-	plain := build(t, fixtureReads(t))
+	plain := build(t, leakyReads(t))
 	var addrs []string
 	// frags are the pieces that give an address away alone: type.name, the name
 	// of a module call and its key (endpoints, ["s3"], network), and the name
@@ -54,10 +56,11 @@ func TestDropAddressesLeavesNoAddress(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			o := hashedOpts(key)
 			o.DropAddresses = true
-			res, err := Build(fixtureReads(t), o)
+			res, err := Build(leakyReads(t), o)
 			if err != nil {
 				t.Fatal(err)
 			}
+			checkLeakyTags(t, res)
 			if !res.Redaction.AddressesDropped {
 				t.Errorf("redaction: %+v", res.Redaction)
 			}
@@ -148,6 +151,57 @@ func TestDropAddressesKeepsTheMatching(t *testing.T) {
 	for _, n := range got.Tables.Nodes {
 		if n.Address != "" || n.Module != "" {
 			t.Errorf("node %s keeps %q, %q", n.NodeID, n.Address, n.Module)
+		}
+	}
+}
+
+const leakyRoot = "s3://acme-tfstate/prod/leaky.tfstate"
+
+// leakyReads are the fixtures and a state whose resource, in a module, has
+// tags that hold its address, its module path and its Terraform name (in
+// another case too), and one that names none of them. The data source has
+// tags a looked-up resource would have, which are not carried at all.
+func leakyReads(t *testing.T) []Read {
+	t.Helper()
+	const state = `{"version":4,"serial":1,"lineage":"l","terraform_version":"1.9.0","outputs":{},"resources":[
+	 {"module":"module.edge_net","mode":"managed","type":"aws_instance","name":"gateway","provider":"provider[\"registry.terraform.io/hashicorp/aws\"]",
+	  "instances":[{"attributes":{"id":"i-0c0ffee0","tags":{"tf_address":"module.edge_net.aws_instance.gateway","tf_module":"MODULE.EDGE_NET",
+	   "Name":"Gateway","gateway_owner":"ops","team":"payments"}}}]},
+	 {"module":"module.edge_net","mode":"data","type":"aws_ami","name":"imagelookup","provider":"provider[\"registry.terraform.io/hashicorp/aws\"]",
+	  "instances":[{"attributes":{"id":"ami-0aa11bb2","tags":{"source":"looked-up"}}}]}]}`
+	d, err := tfstate.Parse([]byte(state), leakyRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return append(fixtureReads(t), Read{Location: leakyRoot, Docs: []tfstate.Document{d}})
+}
+
+// checkLeakyTags checks that the resource of leakyReads kept the one tag that
+// names nothing, that the dropped ones are counted and their keys not listed,
+// and that the data source has no tag.
+func checkLeakyTags(t *testing.T, res Result) {
+	t.Helper()
+	var kept int
+	for _, n := range res.Tables.Nodes {
+		if n.Tags["team"] == "payments" {
+			kept++
+			if len(n.Tags) != 1 {
+				t.Errorf("the resource keeps %v, want only team", n.Tags)
+			}
+		}
+		if n.Tags["source"] != "" {
+			t.Errorf("a data source has tags %v", n.Tags)
+		}
+	}
+	if kept != 1 {
+		t.Errorf("%d nodes keep the unrelated tag, want 1", kept)
+	}
+	if !strings.Contains(res.Limits, "4 tags look like secrets, or were dropped by request") {
+		t.Errorf("limits do not count the tags that gave an address away: %s", res.Limits)
+	}
+	for _, k := range res.Redaction.TagKeysDropped {
+		if strings.EqualFold(k, "gateway_owner") || strings.EqualFold(k, "tf_address") || strings.EqualFold(k, "tf_module") {
+			t.Errorf("the dropped keys list %q", k)
 		}
 	}
 }

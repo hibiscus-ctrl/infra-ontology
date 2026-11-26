@@ -5,7 +5,7 @@ go 1.27.0
 toolchain go1.27.4
 
 require (
-	github.com/IgnatG/infraharvest v0.0.0-20261126115047-45dde6406a9b
+	github.com/IgnatG/infraharvest v0.0.0-20261126120609-53045c5c68e5
 	github.com/duckdb/duckdb-go/v2 v2.20001.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/parquet-go/parquet-go v0.32.1

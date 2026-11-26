@@ -4,6 +4,7 @@
 package ingest
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/IgnatG/infraharvest/pkg/secretscan"
@@ -79,7 +80,9 @@ func (b *builder) hashField(id, field, v string) string {
 // it also leaves every Terraform address, the module path that is part of one,
 // the name a state gave a resource or a module call (the last part of its
 // address) and a module call's native ID out of the nodes; the matching of
-// state to inventory is done by then, so nothing needs them. Node IDs are
+// state to inventory is done by then, so nothing needs them. A tag whose key
+// or value holds one of them (tf_address = module.network.aws_vpc.main, or
+// Name = main) is dropped with them, before they are cleared. Node IDs are
 // not changed: a diff joins on them.
 func (b *builder) redactTables(t snapshot.Tables) snapshot.Tables {
 	if b.key == nil && !b.o.DropAddresses {
@@ -91,6 +94,11 @@ func (b *builder) redactTables(t snapshot.Tables) snapshot.Tables {
 			states[s.SourceID] = s.Kind == snapshot.SourceState
 		}
 		for i, n := range t.Nodes {
+			name := ""
+			if n.Kind == snapshot.KindResource && states[n.SourceID] {
+				name = n.Name
+			}
+			n.Tags = b.dropAddressTags(n.Tags, n.Address, n.Module, name)
 			n.Address, n.Module = "", ""
 			switch {
 			case n.Kind == snapshot.KindModuleCall:
@@ -130,4 +138,64 @@ func (b *builder) redactTables(t snapshot.Tables) snapshot.Tables {
 		t.Sources[i] = s
 	}
 	return t
+}
+
+// minNamedTF is the shortest Terraform name that a tag holding it gives away:
+// a shorter one would be found in tags that do not name the resource. It is
+// secretscan's threshold for IDs and names.
+const minNamedTF = 4
+
+// instanceKey matches the key of a count or for_each instance in an address.
+var instanceKey = regexp.MustCompile(`\[[^\]]*\]`)
+
+// dropAddressTags returns tags less those whose key or value holds, in any
+// case, an address, a module path or a Terraform name (left empty where it is
+// not one, as for a resource only an inventory holds) that is long enough to
+// say something. It runs before the tag filter on the tags of a state, which
+// the filter may hash, and again on the tables, for the tags an inventory
+// brought, and before the address is cleared. The tags that go are counted
+// with the other dropped tags, and their keys are not listed, since a key may
+// be the address.
+func (b *builder) dropAddressTags(tags map[string]string, address, module, name string) map[string]string {
+	if len(tags) == 0 {
+		return tags
+	}
+	var needles []string
+	add := func(v string, shortest int) {
+		for _, s := range []string{v, instanceKey.ReplaceAllString(v, "")} {
+			if len(s) >= shortest && s != "" {
+				needles = append(needles, strings.ToLower(s))
+			}
+		}
+	}
+	add(address, 1)
+	add(module, 1)
+	add(name, minNamedTF)
+	if len(needles) == 0 {
+		return tags
+	}
+	holds := func(s string) bool {
+		s = strings.ToLower(s)
+		for _, w := range needles {
+			if strings.Contains(s, w) {
+				return true
+			}
+		}
+		return false
+	}
+	kept := make(map[string]string, len(tags))
+	for k, v := range tags {
+		if holds(k) || holds(v) {
+			b.tagsDropped++
+			continue
+		}
+		kept[k] = v
+	}
+	if len(kept) == len(tags) {
+		return tags
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return kept
 }

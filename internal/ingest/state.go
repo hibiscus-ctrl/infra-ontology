@@ -391,12 +391,23 @@ func (b *builder) instanceNode(s *docState, in tfstate.Instance) snapshot.Node {
 	if b.key != nil {
 		b.raw[nodeID] = rawID{id: id, arn: arn}
 	}
+	// The tags of a data source are the looked-up resource's, not those of a
+	// resource this state manages, so only a managed resource has any.
+	var tags map[string]string
+	if in.Mode != "data" {
+		raw := in.Tags
+		if b.o.DropAddresses {
+			// Before the filter, which may hash a tag that holds the name.
+			raw = b.dropAddressTags(raw, in.Address, in.Module, in.Name)
+		}
+		tags = b.filterTags(Resource{ID: id, Name: in.Name, Tags: raw}, false)
+	}
 	return snapshot.Node{
 		NodeID: nodeID,
 		Kind:   snapshot.KindResource, Cloud: cloud, Account: sc.account, Region: sc.region,
 		TFType: tfType, NativeID: sc.id, ARNOrPath: sc.path, Name: in.Name,
 		Address: in.Address, Module: in.Module, Root: s.loc,
-		Tags:          b.filterTags(Resource{ID: id, Name: in.Name, Tags: in.Tags}, false),
+		Tags:          tags,
 		ManagedStatus: managed, Confidence: snapshot.Observed, SourceID: s.source,
 	}
 }
@@ -546,7 +557,7 @@ func (b *builder) limits() string {
 		s = append(s, "IDs, names, Terraform addresses and state locations are HMAC-SHA256 hashes under a key this snapshot does not hold; types, accounts, regions and counts are readable.")
 	}
 	if b.o.DropAddresses {
-		s = append(s, "Terraform addresses, module paths and the Terraform names of resources and module calls are left out of the nodes.")
+		s = append(s, "Terraform addresses, module paths and the Terraform names of resources and module calls are left out of the nodes, and so are the tags whose key or value holds one of them.")
 		if b.key == nil {
 			s = append(s, "The node IDs of module calls, data sources and resources without an ID are unkeyed SHA-256 hashes of the state location and the address, so a guessed address can be confirmed; --hash-ids keys them.")
 		}
@@ -602,8 +613,10 @@ func (b *builder) readFrom() []string {
 
 // digest is the SHA-256 of what is kept of a state: its serial, lineage and
 // version, and the address, type, id and dependencies of each instance. It is
-// not the hash of the state's bytes, which are not kept, but changes whenever
-// anything this reader keeps changes.
+// not the hash of the state's bytes, which are not kept. Tags are kept but
+// left out of it on purpose: an unkeyed hash over the raw tag values would let
+// anyone confirm a guess at one, a secret that no detector caught included.
+// So a change to a tag alone does not change the digest.
 func digest(d tfstate.Document) string {
 	h := sha256.New()
 	w := func(fields ...string) {
