@@ -254,8 +254,10 @@ func consumerKeys(rs tfstate.RemoteState, from string) []string {
 		}
 		resolved := localPath(rs.Key, from)
 		keys := []string{"local|" + resolved}
-		// A path that cannot be placed from the consumer, because the state is
-		// not a local file, is still matched by what a producer path ends in.
+		// The path as written is offered too, matched by what a producer path
+		// ends in, as before paths were placed: it finds states read from
+		// another layout than the one they were written in. A path that climbs
+		// out (..) is only matched where it resolves.
 		if plain := path.Clean(filepath.ToSlash(rs.Key)); plain != resolved && !strings.HasPrefix(plain, "..") {
 			keys = append(keys, "local|"+plain)
 		}
