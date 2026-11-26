@@ -37,8 +37,9 @@ const (
 // Types of the placeholder nodes the trust edges start at, where the
 // principal is not a resource of the snapshot.
 const (
-	typeServicePrincipal = "service_principal"
-	typeAnyPrincipal     = "any_principal"
+	typeServicePrincipal  = "service_principal"
+	typeAnyPrincipal      = "any_principal"
+	typeWildcardPrincipal = "wildcard_principal"
 )
 
 var accountID = regexp.MustCompile(`^[0-9]{12}$`)
@@ -51,8 +52,8 @@ type principalRef struct {
 // trustState counts what the trust policies held that no edge could be made
 // of, for the manifest's limits.
 type trustState struct {
-	roles, unreadable, skipped int
-	arns                       map[string]string // role and user ARNs of the snapshot, to node IDs
+	roles, unreadable, skipped, rejected int
+	arns                                 map[string]string // role and user ARNs of the snapshot, to node IDs
 }
 
 // addTrust adds a can_assume edge, from each principal an aws_iam_role's trust
@@ -147,9 +148,13 @@ func (b *builder) roleTrust(s *docState, role string, stmts []tfstate.TrustState
 			principals = []tfstate.TrustPrincipal{{Type: "*", Value: "*"}}
 		}
 		for _, p := range principals {
-			ref, ok := b.principal(s, p, account)
-			if !ok {
-				b.trust.skipped++
+			ref, outcome := b.principal(s, p, account)
+			if outcome != principalEdge {
+				if outcome == principalRejected {
+					b.trust.rejected++
+				} else {
+					b.trust.skipped++
+				}
 				continue
 			}
 			basis, conf := ref.basis, ref.conf
@@ -165,34 +170,73 @@ func (b *builder) roleTrust(s *docState, role string, stmts []tfstate.TrustState
 	}
 }
 
+// What principal makes of a principal of a trust policy.
+const (
+	principalEdge     = iota // an edge starts at the node
+	principalSkipped         // a kind of principal that is not turned into an edge
+	principalRejected        // a value that is not the shape its type has, never written
+)
+
+// maxPrincipalLen is the longest principal value read: an ARN is 2048 at most.
+const maxPrincipalLen = 2048
+
+// servicePrincipal is the shape of a service principal: a service name (and a
+// region, for the regional ones) under the domain of a partition of AWS. A
+// value of any other shape is not written: it could be anything somebody put
+// in a policy.
+var servicePrincipal = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)*\.(amazonaws\.com(\.cn)?|c2s\.ic\.gov|sc2s\.sgov\.gov)$`)
+
 // principal finds or makes the node a principal of a trust policy stands for.
-// It reports false for a principal that is not turned into an edge: a
-// federated or canonical user principal, a unique ID of a deleted principal, a
-// session, or an ARN of another service.
-func (b *builder) principal(s *docState, p tfstate.TrustPrincipal, roleAccount string) (principalRef, bool) {
+// It reports principalSkipped for a principal that is not turned into an edge
+// (a federated or canonical user principal, a unique ID of a deleted
+// principal, a session, or an ARN of another service) and principalRejected
+// for a service that is not named as a service is, or a bare string that is
+// not "*".
+func (b *builder) principal(s *docState, p tfstate.TrustPrincipal, roleAccount string) (principalRef, int) {
+	if len(p.Value) > maxPrincipalLen {
+		return principalRef{}, principalRejected
+	}
 	switch {
-	case p.Type == "*" || strings.Contains(p.Value, "*"):
-		if p.Type != "*" && p.Type != "AWS" {
-			return principalRef{}, false
+	case p.Type == "*":
+		// A bare string: only "*" is one.
+		if p.Value != "*" {
+			return principalRef{}, principalRejected
 		}
-		return principalRef{b.placeholder(s, "", typeAnyPrincipal, "", "*"), BasisTrustWildcard, snapshot.Inferred}, true
+		return principalRef{b.placeholder(s, "", typeAnyPrincipal, "", "*"), BasisTrustWildcard, snapshot.Inferred}, principalEdge
 	case p.Type == "Service":
-		return principalRef{b.placeholder(s, "", typeServicePrincipal, "", p.Value), BasisTrustPolicy, snapshot.Computed}, true
+		if !servicePrincipal.MatchString(strings.ToLower(p.Value)) {
+			return principalRef{}, principalRejected
+		}
+		return principalRef{b.placeholder(s, "", typeServicePrincipal, "", p.Value), BasisTrustPolicy, snapshot.Computed}, principalEdge
 	case p.Type != "AWS":
-		return principalRef{}, false
+		return principalRef{}, principalSkipped
+	case p.Value == "*":
+		return principalRef{b.placeholder(s, "", typeAnyPrincipal, "", "*"), BasisTrustWildcard, snapshot.Inferred}, principalEdge
+	case strings.Contains(p.Value, "*"):
+		// A wildcard ARN names a set of principals, each its own: one
+		// placeholder for each pattern, so that two patterns do not merge.
+		parts := strings.SplitN(p.Value, ":", 6)
+		if len(parts) != 6 || parts[0] != "arn" || parts[2] != "iam" {
+			return principalRef{}, principalSkipped
+		}
+		acct := ""
+		if accountID.MatchString(parts[4]) {
+			acct = parts[4]
+		}
+		return principalRef{b.placeholder(s, acct, typeWildcardPrincipal, "", p.Value), BasisTrustWildcard, snapshot.Inferred}, principalEdge
 	case accountID.MatchString(p.Value):
-		return principalRef{b.accountNode(s, p.Value), BasisTrustAccount, snapshot.Inferred}, true
+		return principalRef{b.accountNode(s, p.Value), BasisTrustAccount, snapshot.Inferred}, principalEdge
 	case !strings.HasPrefix(p.Value, "arn:"):
-		return principalRef{}, false
+		return principalRef{}, principalSkipped
 	}
 	parts := strings.SplitN(p.Value, ":", 6)
 	if len(parts) != 6 || parts[2] != "iam" || !accountID.MatchString(parts[4]) {
-		return principalRef{}, false
+		return principalRef{}, principalSkipped
 	}
 	acct, res := parts[4], parts[5]
 	switch {
 	case res == "root":
-		return principalRef{b.accountNode(s, acct), BasisTrustAccount, snapshot.Inferred}, true
+		return principalRef{b.accountNode(s, acct), BasisTrustAccount, snapshot.Inferred}, principalEdge
 	case strings.HasPrefix(res, "role/") || strings.HasPrefix(res, "user/"):
 		basis, conf := BasisTrustPolicy, snapshot.Computed
 		switch {
@@ -203,15 +247,15 @@ func (b *builder) principal(s *docState, p tfstate.TrustPrincipal, roleAccount s
 			basis, conf = BasisTrustCrossAccount, snapshot.Inferred
 		}
 		if id, ok := b.trust.arns[p.Value]; ok {
-			return principalRef{id, basis, conf}, true
+			return principalRef{id, basis, conf}, principalEdge
 		}
 		typ := "aws_iam_role"
 		if strings.HasPrefix(res, "user/") {
 			typ = "aws_iam_user"
 		}
-		return principalRef{b.placeholder(s, acct, "", typ, p.Value), basis, conf}, true
+		return principalRef{b.placeholder(s, acct, "", typ, p.Value), basis, conf}, principalEdge
 	}
-	return principalRef{}, false
+	return principalRef{}, principalSkipped
 }
 
 // placeholder adds an external node for a principal the snapshot holds no
@@ -251,6 +295,9 @@ func (b *builder) trustLimits() []string {
 	s := []string{"can_assume edges come only from the trust policies of the aws_iam_role resources a state holds: a role made outside Terraform has none, and identity policies, permission boundaries, service control policies and session policies are not read, so an edge says a trust policy allows it, not that the principal can. An account, a wildcard, a condition, a Deny statement or another account makes an edge inferred, and no condition or Deny is evaluated."}
 	if t.unreadable > 0 {
 		s = append(s, fmt.Sprintf("%d roles have a trust policy that could not be read, or that names more than %d principals, and have no can_assume edge.", t.unreadable, maxTrustPrincipals))
+	}
+	if t.rejected > 0 {
+		s = append(s, fmt.Sprintf("%d principals of trust policies are not of the form their type has (a service that is not a service name, a string that is not \"*\") and are not kept.", t.rejected))
 	}
 	if t.skipped > 0 {
 		s = append(s, fmt.Sprintf("%d principals of trust policies (federated providers, canonical users, sessions, unique IDs of deleted principals and ARNs of other services) are not turned into edges.", t.skipped))

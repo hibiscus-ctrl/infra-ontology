@@ -351,3 +351,62 @@ func TestTrustPrincipalCap(t *testing.T) {
 		}
 	}
 }
+
+// Principals keep their own nodes: "*" is the one any_principal, a wildcard
+// ARN its own placeholder, and a value that is not of the shape its type has
+// makes no edge and is never written.
+func TestTrustPrincipalShapes(t *testing.T) {
+	res := build(t, []Read{stateRead(t, iamRoot,
+		roleResource(t, "star", policy(allow(`"*"`, ""))),
+		roleResource(t, "bare", policy(allow(`"PLANTED-BARE-SECRET"`, ""))),
+		roleResource(t, "wild", policy(allow(`{"AWS":["arn:aws:iam::111111111111:role/ci-*","arn:aws:iam::111111111111:role/*"]}`, ""))),
+		roleResource(t, "wild2", policy(allow(`{"AWS":"arn:aws:iam::111111111111:role/*"}`, ""))),
+		roleResource(t, "svc", policy(allow(`{"Service":["ec2.amazonaws.com","logs.us-east-1.amazonaws.com","ec2.amazonaws.com.cn"]}`, ""))),
+		roleResource(t, "badsvc", policy(allow(`{"Service":["PLANTED-SERVICE-SECRET","ec2.amazonaws.com.evil.example","*.amazonaws.com","hunter2 amazonaws.com"]}`, ""))))})
+	tb := res.Tables
+
+	if es := canAssume(t, tb, "star"); len(es) != 1 || nodeByID(tb, es[0].FromID).InventoryType != "any_principal" {
+		t.Errorf("star: %+v", es)
+	}
+	if es := canAssume(t, tb, "bare"); len(es) != 0 {
+		t.Errorf("a bare string that is not *: %+v", es)
+	}
+	wild := canAssume(t, tb, "wild")
+	if len(wild) != 2 {
+		t.Fatalf("two wildcard ARNs: %+v", wild)
+	}
+	seen := map[string]bool{}
+	for _, e := range wild {
+		n := nodeByID(tb, e.FromID)
+		if n.InventoryType != "wildcard_principal" || e.Confidence != snapshot.Inferred || e.Basis != BasisTrustWildcard ||
+			n.NativeID != n.ARNOrPath || n.Account != "111111111111" {
+			t.Errorf("wildcard ARN: %+v from %+v", e, n)
+		}
+		seen[n.NativeID] = true
+	}
+	if len(seen) != 2 {
+		t.Errorf("the two patterns share a node: %v", seen)
+	}
+	// The same pattern in another role is the same node.
+	if w2 := canAssume(t, tb, "wild2"); len(w2) != 1 || !seen[nodeByID(tb, w2[0].FromID).NativeID] {
+		t.Errorf("wild2: %+v", w2)
+	}
+	if es := canAssume(t, tb, "svc"); len(es) != 3 {
+		t.Errorf("services: %+v", es)
+	}
+	if es := canAssume(t, tb, "badsvc"); len(es) != 0 {
+		t.Errorf("services of the wrong shape: %+v", es)
+	}
+	raw, _ := json.Marshal(res)
+	for _, planted := range []string{"PLANTED-BARE-SECRET", "PLANTED-SERVICE-SECRET", "evil.example", "hunter2"} {
+		if strings.Contains(string(raw), planted) {
+			t.Errorf("the rows hold %q", planted)
+		}
+	}
+	if !strings.Contains(res.Limits, "5 principals of trust policies are not of the form") {
+		t.Errorf("limits: %s", res.Limits)
+	}
+	if err := snapshot.Validate(&tb); err != nil {
+		t.Errorf("the rows are not consistent: %v", err)
+	}
+}
