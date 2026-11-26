@@ -249,3 +249,59 @@ func countEdges(tb snapshot.Tables, kind string) int {
 	}
 	return n
 }
+
+// dataRole is a data.aws_iam_role of the ARN of the role called name.
+func dataRole(name, label string) string {
+	return `{"mode":"data","type":"aws_iam_role","name":"` + label + `","provider":"provider[\"registry.terraform.io/hashicorp/aws\"]",
+	 "instances":[{"attributes":{"id":"` + name + `","arn":"arn:aws:iam::111111111111:role/` + name + `"}}]}`
+}
+
+func stateRead(t *testing.T, root string, resources ...string) Read {
+	t.Helper()
+	state := `{"version":4,"serial":1,"lineage":"l","terraform_version":"1.9.0","outputs":{},"resources":[` + strings.Join(resources, ",") + `]}`
+	d, err := tfstate.Parse([]byte(state), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Read{Location: root, Docs: []tfstate.Document{d}}
+}
+
+// A data source and a managed role of one ARN: the edge starts at the managed
+// one, whatever the order of the maps, and among data sources alone at the
+// node with the lowest ID.
+func TestTrustPrefersManagedRole(t *testing.T) {
+	ci := `{"AWS":"arn:aws:iam::111111111111:role/ci"}`
+	for i := 0; i < 40; i++ {
+		res := build(t, []Read{stateRead(t, iamRoot,
+			dataRole("ci", "a"), dataRole("ci", "z"),
+			roleResource(t, "ci", policy(allow(`{"Service":"ec2.amazonaws.com"}`, ""))),
+			roleResource(t, "app", policy(allow(ci, ""))))})
+		managed := nodeAt(t, res.Tables, iamRoot, "aws_iam_role.ci").NodeID
+		es := canAssume(t, res.Tables, "app")
+		if len(es) != 1 || es[0].FromID != managed {
+			t.Fatalf("run %d: edge from %v, want the managed role %s", i, es, managed)
+		}
+	}
+	// Only data sources: the lowest node ID, every time.
+	var first string
+	for i := 0; i < 40; i++ {
+		res := build(t, []Read{stateRead(t, iamRoot,
+			dataRole("ci", "a"), dataRole("ci", "b"), dataRole("ci", "c"),
+			roleResource(t, "app", policy(allow(ci, ""))))})
+		want := ""
+		for _, n := range res.Tables.Nodes {
+			if n.Kind == snapshot.KindResource && n.ARNOrPath == "arn:aws:iam::111111111111:role/ci" && (want == "" || n.NodeID < want) {
+				want = n.NodeID
+			}
+		}
+		es := canAssume(t, res.Tables, "app")
+		if len(es) != 1 || es[0].FromID != want {
+			t.Fatalf("run %d: edge from %v, want %s", i, es, want)
+		}
+		if first == "" {
+			first = want
+		} else if first != want {
+			t.Fatalf("ids changed between runs")
+		}
+	}
+}

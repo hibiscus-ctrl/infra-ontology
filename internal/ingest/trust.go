@@ -65,6 +65,14 @@ func (b *builder) addTrust(states []*docState) {
 	for id, n := range b.nodes {
 		if n.Kind == snapshot.KindResource && n.Cloud == "aws" && n.ARNOrPath != "" &&
 			(n.TFType == "aws_iam_role" || n.TFType == "aws_iam_user") && !b.preHashed[id+"\x00arn_or_path"] {
+			// A thing a state manages beats a data source or an inventory
+			// listing of the same ARN; among equals the lowest ID wins, so
+			// the edges do not depend on the order of the map.
+			if old, ok := b.trust.arns[n.ARNOrPath]; ok {
+				if o := b.nodes[old]; arnRank(o) < arnRank(n) || arnRank(o) == arnRank(n) && old < id {
+					continue
+				}
+			}
 			b.trust.arns[n.ARNOrPath] = id
 		}
 	}
@@ -86,6 +94,15 @@ func (b *builder) addTrust(states []*docState) {
 			}
 		}
 	}
+}
+
+// arnRank orders the nodes of one ARN: 0 for one a state manages (or did, and
+// an inventory no longer lists), 1 for a data source or an inventory's own.
+func arnRank(n snapshot.Node) int {
+	if n.ManagedStatus == snapshot.Managed || n.ManagedStatus == snapshot.Missing {
+		return 0
+	}
+	return 1
 }
 
 // roleTrust adds the edges of one role's trust statements.
