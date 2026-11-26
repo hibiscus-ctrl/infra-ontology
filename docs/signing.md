@@ -59,6 +59,15 @@ Keyless signing needs the network: it fetches the Sigstore signing configuration
 
 The certificate carries the job's identity, for example the workflow file and ref of a GitHub Actions run, and the log is public: anyone can see that this identity signed this manifest digest. The snapshot itself is never uploaded; only the manifest's digest is.
 
+## What CI proves
+
+The [Keyless signing](../.github/workflows/keyless-signing.yml) workflow runs the whole keyless path on every push to main and on every pull request from this repository (not from forks or Dependabot, whose tokens cannot ask for an OIDC identity). In a GitHub Actions job with `id-token: write` it builds the `noduckdb` binary and a snapshot from a fixture state, signs it with `snapshot sign --keyless` against the public-good Fulcio and Rekor, and then checks the bundle twice:
+
+- with `snapshot verify --require-signature`, pinning `--certificate-identity` to this repository's workflow file at the ref of the run (`https://github.com/hibiscus-ctrl/infra-ontology/.github/workflows/keyless-signing.yml@refs/heads/main` on a push, `...@refs/pull/N/merge` on a pull request) and `--certificate-oidc-issuer` to `https://token.actions.githubusercontent.com`;
+- with `cosign verify-blob --bundle manifest.sig.json` and the same identity and issuer.
+
+A third step checks that the same bundle does not verify against another workflow file as the identity. So CI shows that a bundle this tool writes keyless is accepted by cosign, that the certificate carries the workflow identity and the Actions issuer, and that the tool's own verifier enforces the identity pin. It does not check a signature from a release build or a forked run, and it runs with the live Sigstore services, so an outage of Fulcio or Rekor fails the job.
+
 ## Verifying
 
 `verify` (and `snapshot verify`) checks the signature when there is one:

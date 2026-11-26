@@ -1,0 +1,93 @@
+# Copyright 2026 Gabriel Ignat
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: Keyless signing
+
+# Proves keyless snapshot signing end to end. The job builds a small snapshot
+# from a fixture state, signs it with `snapshot sign --keyless` (Fulcio and
+# Rekor, public good, with this job's OIDC token), then checks the bundle twice:
+# with the tool's own `snapshot verify`, pinning the certificate identity (this
+# workflow file at this ref) and the GitHub Actions issuer, and with
+# `cosign verify-blob`. Keyless needs the job's OIDC token, so it runs only on
+# pushes to main and on pull requests from this repository, not from forks (a
+# fork's token cannot be issued with id-token: write) and not for Dependabot
+# (its token is read-only).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  keyless:
+    name: sign and verify a snapshot keyless
+    if: >-
+      github.event_name == 'push' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CGO_ENABLED: "0"
+      ISSUER: https://token.actions.githubusercontent.com
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - name: Install cosign
+        uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
+      - name: Build the command
+        run: go build -tags noduckdb -o "$RUNNER_TEMP/infra-ontology" ./cmd/infra-ontology
+      - name: Build a snapshot from a fixture state
+        run: |
+          "$RUNNER_TEMP/infra-ontology" snapshot build \
+            --state internal/ingest/testdata/states/app.tfstate \
+            --out "$RUNNER_TEMP/snapshots" --label keyless-ci
+          dirs=("$RUNNER_TEMP"/snapshots/*/)
+          test "${#dirs[@]}" -eq 1
+          echo "SNAPSHOT=${dirs[0]%/}" >> "$GITHUB_ENV"
+      - name: Sign the snapshot keyless
+        run: '"$RUNNER_TEMP/infra-ontology" snapshot sign --keyless "$SNAPSHOT"'
+      # The identity is built from the repository, this file and the ref the
+      # run is on (refs/heads/main on a push, refs/pull/N/merge on a pull
+      # request), not copied from the token, so a signature from any other
+      # workflow, repository or ref fails.
+      - name: Verify with the tool, pinning the identity
+        run: |
+          identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/keyless-signing.yml@${GITHUB_REF}"
+          echo "identity: $identity"
+          "$RUNNER_TEMP/infra-ontology" snapshot verify --json --require-signature \
+            --certificate-identity "$identity" \
+            --certificate-oidc-issuer "$ISSUER" "$SNAPSHOT" | tee "$RUNNER_TEMP/verify.json"
+          grep -Eq '"status": *"verified"' "$RUNNER_TEMP/verify.json"
+      - name: Verify with cosign verify-blob
+        run: |
+          identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/keyless-signing.yml@${GITHUB_REF}"
+          cosign verify-blob \
+            --bundle "$SNAPSHOT/manifest.sig.json" \
+            --certificate-identity "$identity" \
+            --certificate-oidc-issuer "$ISSUER" \
+            "$SNAPSHOT/manifest.json"
+      - name: A different identity must not verify
+        run: |
+          if "$RUNNER_TEMP/infra-ontology" snapshot verify --require-signature \
+            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/other.yml@${GITHUB_REF}" \
+            --certificate-oidc-issuer "$ISSUER" "$SNAPSHOT"; then
+            echo "a signature verified against the wrong identity" >&2
+            exit 1
+          fi
