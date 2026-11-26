@@ -120,3 +120,26 @@ func TestAzureIDsOfAnotherCaseAreOneNode(t *testing.T) {
 		})
 	}
 }
+
+func TestOnlyAzureIDsFoldCase(t *testing.T) {
+	for _, tc := range []struct {
+		cloud, id string
+		fold      bool
+	}{
+		{"azure", "/subscriptions/0000/resourceGroups/rg", true},
+		{"azure", "/providers/Microsoft.Management/managementGroups/Root", true},
+		{"azure", "/tenants/0000/providers/Microsoft.Authorization/roleDefinitions/r", true},
+		{"azure", "subscriptions/0000", false},
+		{"aws", "/providers/Example/Thing", false},
+		{"gcp", "/tenants/Example", false},
+		{"", "/providers/Example/Thing", false},
+	} {
+		if got := foldsCase(tc.cloud, tc.id); got != tc.fold {
+			t.Errorf("foldsCase(%q, %q) = %v, want %v", tc.cloud, tc.id, got, tc.fold)
+		}
+		sc := scopeOf(tc.cloud, tc.id, "", "")
+		if folded := sc.id != tc.id; folded != (tc.fold && strings.ToLower(tc.id) != tc.id) {
+			t.Errorf("scopeOf(%q, %q).id = %q: folded %v, want %v", tc.cloud, tc.id, sc.id, folded, tc.fold)
+		}
+	}
+}

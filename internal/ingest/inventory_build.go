@@ -167,7 +167,7 @@ func (b *builder) mergeResource(merged map[invKey]*invResource, inv Inventory, s
 	sc := scopeOf(res.Cloud, res.ID, arn, "")
 	if sc.path == "" && res.CloudID != "" {
 		sc.path = res.CloudID
-		if isAzureID(sc.path) {
+		if foldsCase(res.Cloud, sc.path) {
 			sc.path = strings.ToLower(sc.path)
 		}
 	}
