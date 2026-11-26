@@ -14,7 +14,7 @@ const Format = "infra-ontology/snapshot/v1"
 
 // FormatMinor is the minor version this package writes. Within a major,
 // changes only add columns, kinds and members.
-const FormatMinor = 1
+const FormatMinor = 2
 
 // File names inside a snapshot folder.
 const (
@@ -62,6 +62,9 @@ const (
 	EdgeContainedIn  = "contained_in"
 	EdgeDefinedIn    = "defined_in"
 	EdgeReadsStateOf = "reads_state_of"
+	// EdgeCanAssume runs from a principal to a role its trust policy names
+	// (format minor 2).
+	EdgeCanAssume = "can_assume"
 )
 
 // Source kinds and statuses.

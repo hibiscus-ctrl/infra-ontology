@@ -43,7 +43,7 @@ The citation of `blast_radius` shows a row cap one above `limit`: the target's o
 Each tool call appends one JSON line to the file given by `--audit-log`, or to standard error if there is none. The file is created with mode 0600 and only ever appended to.
 
 ```json
-{"time":"2026-11-25T14:03:11.482913Z","tool":"query","client":"claude-code","snapshot_id":"5343debee8ce...","args_hash":"sha256:...","query_hash":"sha256:...","row_count":12,"truncated":false,"outcome":"ok","duration_ms":9}
+{"time":"2026-11-25T14:03:11.482913Z","tool":"query","client":"claude-code","snapshot_id":"99e19bc9cf3c...","args_hash":"sha256:...","query_hash":"sha256:...","row_count":12,"truncated":false,"outcome":"ok","duration_ms":9}
 ```
 
 | Field | Meaning |

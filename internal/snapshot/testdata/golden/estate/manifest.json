@@ -1,7 +1,7 @@
 {
   "format": "infra-ontology/snapshot/v1",
-  "format_minor": 1,
-  "snapshot_id": "5343debee8ce268ed61bde80a0e6a29b6d6bf770674cadf08a77d2961397cb28",
+  "format_minor": 2,
+  "snapshot_id": "99e19bc9cf3ca3159e4c62b9703496e09f6f125ed5140d0f0aecbea4b3824f77",
   "parent_id": "",
   "label": "baseline",
   "created_at": "2026-11-25T10:15:00Z",

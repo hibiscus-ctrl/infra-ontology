@@ -155,6 +155,7 @@ func BuildAll(reads []Read, invs []InventoryRead, o Options) (Result, error) {
 			return Result{}, fmt.Errorf("no state or inventory could be read:%s", b.failureList())
 		}
 	}
+	b.addTrust(states)
 	tables := b.redactTables(b.tables())
 	return Result{
 		Tables: tables, Limits: b.limits(), Redaction: b.redaction(tables),
@@ -230,6 +231,9 @@ type builder struct {
 	raw        map[string]rawID
 	preHashed  map[string]bool
 	mismatched map[string]bool
+
+	// trust is what the trust policies of roles held (see addTrust).
+	trust trustState
 }
 
 func (b *builder) fail(r Read) {
@@ -601,6 +605,7 @@ func (b *builder) limits() string {
 		s = append(s, strconv.Itoa(b.noID)+" instances have an id or ARN that looks like a credential and are identified by their address instead.")
 	}
 	s = append(s, b.inventoryLimits()...)
+	s = append(s, b.trustLimits()...)
 	return strings.Join(s, " ")
 }
 
