@@ -84,10 +84,19 @@ func scopeOf(cloud, id, arn, identityID string) scope {
 	return s
 }
 
+// azureRoots start the resource IDs of Azure: those in a subscription, and
+// the ones above it (management groups, tenant-wide role definitions).
+var azureRoots = []string{"/subscriptions/", "/providers/", "/tenants/"}
+
 // isAzureID tells an Azure resource ID, which Azure treats without regard to
 // case, from other identifiers.
 func isAzureID(id string) bool {
-	return len(id) > len("/subscriptions/") && strings.EqualFold(id[:len("/subscriptions/")], "/subscriptions/")
+	for _, r := range azureRoots {
+		if len(id) > len(r) && strings.EqualFold(id[:len(r)], r) {
+			return true
+		}
+	}
+	return false
 }
 
 // segmentAfter returns the path segment that follows the segment key in a
