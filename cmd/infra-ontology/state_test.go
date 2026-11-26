@@ -106,18 +106,15 @@ func TestStateDirectoryAndRemoteStateByPath(t *testing.T) {
 			reads++
 		}
 	}
-	// app2 names net/terraform.tfstate, which ends the path of the net state.
-	// app names ../net/terraform.tfstate, which leaves its own folder and so
-	// cannot be placed: it reads an external placeholder.
+	// app names ../net/terraform.tfstate, which from its own folder is the net
+	// state. app2 names net/terraform.tfstate, which is the net state's path
+	// as written. Both read it, and nothing is left as an external placeholder.
 	if reads != 2 {
 		t.Errorf("%d reads_state_of edges, want 2", reads)
 	}
-	if !strings.Contains(l.Manifest.Limits, "../net/terraform.tfstate") {
-		t.Errorf("the limits do not name the path the app state reads: %s", l.Manifest.Limits)
-	}
 	for _, n := range l.Tables.Nodes {
-		if n.Kind == snapshot.KindExternal && !strings.Contains(l.Manifest.Limits, n.Name) {
-			t.Errorf("external %s is not in the limits", n.Name)
+		if n.Kind == snapshot.KindExternal {
+			t.Errorf("external placeholder %s: every path names the net state", n.Name)
 		}
 	}
 }
