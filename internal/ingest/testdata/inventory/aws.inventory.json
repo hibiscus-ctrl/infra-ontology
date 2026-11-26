@@ -150,7 +150,24 @@
       "other_tool": 0,
       "cloud": 0
     },
-    "types": [],
-    "scopes": []
+    "types": [
+      { "type": "aws_instance", "complete": true, "counts": { "failed": 0 } }
+    ],
+    "scopes": [
+      {
+        "scope": "aws/111111111111/eu-west-1",
+        "complete": true,
+        "complete_types": ["aws_instance"],
+        "counts": { "failed": 0 }
+      }
+    ]
+  },
+  "filters": {
+    "id": false,
+    "tag": false,
+    "where": false,
+    "services": false,
+    "group": false,
+    "partial": false
   }
 }

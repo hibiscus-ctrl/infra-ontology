@@ -55,8 +55,12 @@ type Inventory struct {
 	// and region, such as aws/123456789012/eu-west-2), and Coverage how
 	// complete its listing of them was. Coverage is nil for a document that
 	// does not say (an OCSF inventory, or an inventory/v1 without it).
-	Scopes    []string
-	Coverage  *Coverage
+	Scopes   []string
+	Coverage *Coverage
+	// Filters says which kinds of filter narrowed the listing of any scope. It
+	// is nil for a document that does not say (one an earlier release wrote),
+	// which is taken as narrowed.
+	Filters   *Filters
 	Resources []Resource
 	// Digest is the SHA-256 of what is kept of the document.
 	Digest string
@@ -73,6 +77,28 @@ type Coverage struct {
 	// Scopes and Types are keyed by the scope and by the Terraform type as
 	// the document writes them.
 	Scopes, Types map[string]Counts
+	// ScopeDone and TypeDone say what the document calls a complete listing:
+	// of a scope (and the types listed in full in it, those it found none of
+	// too), and of a type (in every scope listed). Absent is not complete.
+	ScopeDone map[string]ScopeDone
+	TypeDone  map[string]bool
+}
+
+// ScopeDone is a scope whose document says it was listed in full, and the
+// types listed in full in it.
+type ScopeDone struct {
+	Complete bool
+	Types    map[string]bool
+}
+
+// Filters are the kinds of filter that narrow a listing: --id, --tag, --where,
+// --services or --skip, a provider scope of one group, and a listing in part.
+// A kind the document does not give is true: it does not say it was not used.
+type Filters struct{ ID, Tag, Where, Services, Group, Partial bool }
+
+// Any says some kind of filter narrowed the listing.
+func (f Filters) Any() bool {
+	return f.ID || f.Tag || f.Where || f.Services || f.Group || f.Partial
 }
 
 // Counts are the resources of a part of a listing that could not be read
@@ -196,14 +222,20 @@ type inventoryV1 struct {
 	Coverage  *struct {
 		Totals *countsV1 `json:"totals"`
 		Types  []struct {
-			Type   string   `json:"type"`
-			Counts countsV1 `json:"counts"`
+			Type     string   `json:"type"`
+			Counts   countsV1 `json:"counts"`
+			Complete *bool    `json:"complete"`
 		} `json:"types"`
 		Scopes []struct {
-			Scope  string   `json:"scope"`
-			Counts countsV1 `json:"counts"`
+			Scope         string   `json:"scope"`
+			Counts        countsV1 `json:"counts"`
+			Complete      *bool    `json:"complete"`
+			CompleteTypes []string `json:"complete_types"`
 		} `json:"scopes"`
 	} `json:"coverage"`
+	Filters *struct {
+		ID, Tag, Where, Services, Group, Partial *bool
+	} `json:"filters"`
 }
 
 // countsV1 is the part of a document's counts this package reads.
@@ -242,11 +274,22 @@ func parseInventoryV1(raw []byte) (Inventory, error) {
 		inv.Coverage = &Coverage{
 			Totals: Counts(*c.Totals), Scopes: make(map[string]Counts, len(c.Scopes)), Types: make(map[string]Counts, len(c.Types)),
 		}
+		inv.Coverage.ScopeDone, inv.Coverage.TypeDone = map[string]ScopeDone{}, map[string]bool{}
 		for _, s := range c.Scopes {
 			inv.Coverage.Scopes[s.Scope] = addCounts(inv.Coverage.Scopes[s.Scope], Counts(s.Counts))
+			inv.Coverage.mergeScopeDone(s.Scope, s.Complete, s.CompleteTypes)
 		}
 		for _, t := range c.Types {
 			inv.Coverage.Types[t.Type] = addCounts(inv.Coverage.Types[t.Type], Counts(t.Counts))
+			_, seen := inv.Coverage.TypeDone[t.Type]
+			inv.Coverage.TypeDone[t.Type] = t.Complete != nil && *t.Complete && (!seen || inv.Coverage.TypeDone[t.Type])
+		}
+	}
+	if f := d.Filters; f != nil {
+		// A kind the document leaves out is not known to be unused.
+		used := func(b *bool) bool { return b == nil || *b }
+		inv.Filters = &Filters{
+			ID: used(f.ID), Tag: used(f.Tag), Where: used(f.Where), Services: used(f.Services), Group: used(f.Group), Partial: used(f.Partial),
 		}
 	}
 	for i, r := range d.Resources {
@@ -262,6 +305,25 @@ func parseInventoryV1(raw []byte) (Inventory, error) {
 		})
 	}
 	return inv, nil
+}
+
+// mergeScopeDone notes what the document says of the completeness of a scope.
+// A scope it names twice is complete only where both say so, in the types
+// both name.
+func (c *Coverage) mergeScopeDone(scope string, complete *bool, types []string) {
+	d := ScopeDone{Complete: complete != nil && *complete, Types: make(map[string]bool, len(types))}
+	for _, t := range types {
+		d.Types[t] = true
+	}
+	if prev, ok := c.ScopeDone[scope]; ok {
+		d.Complete = d.Complete && prev.Complete
+		for t := range d.Types {
+			if !prev.Types[t] {
+				delete(d.Types, t)
+			}
+		}
+	}
+	c.ScopeDone[scope] = d
 }
 
 func addCounts(a, b Counts) Counts {
@@ -413,7 +475,17 @@ func digestOf(inv Inventory) string {
 		for _, typ := range slices.Sorted(maps.Keys(inv.Coverage.Types)) {
 			w(append([]string{"type", typ}, countFields(c.Types[typ])...)...)
 		}
+		for _, scope := range slices.Sorted(maps.Keys(c.ScopeDone)) {
+			d := c.ScopeDone[scope]
+			w(append([]string{"scope-done", scope, fmt.Sprint(d.Complete)}, slices.Sorted(maps.Keys(d.Types))...)...)
+		}
+		for _, typ := range slices.Sorted(maps.Keys(c.TypeDone)) {
+			w("type-done", typ, fmt.Sprint(c.TypeDone[typ]))
+		}
 		w(append([]string{"scopes"}, slices.Sorted(slices.Values(inv.Scopes))...)...)
+	}
+	if f := inv.Filters; f != nil {
+		w("filters", fmt.Sprint(f.ID, f.Tag, f.Where, f.Services, f.Group, f.Partial))
 	}
 	for _, r := range inv.Resources {
 		w(r.Cloud, r.Account, r.Region, r.Type, r.ID, r.CloudID, r.Name, r.Status, r.Basis, r.Address, r.Module, r.Root)

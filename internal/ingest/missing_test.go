@@ -58,8 +58,13 @@ func missingState(t *testing.T, instances []string, vnets ...string) []Read {
 func awsListing(ids ...string) Inventory {
 	inv := Inventory{
 		Location: "aws.inventory.json", Schema: SchemaInventory, Tool: "infraharvest",
-		Scopes:   []string{missScope},
-		Coverage: &Coverage{Scopes: map[string]Counts{missScope: {}}, Types: map[string]Counts{"aws_instance": {}}},
+		Scopes: []string{missScope},
+		Coverage: &Coverage{
+			Scopes: map[string]Counts{missScope: {}}, Types: map[string]Counts{"aws_instance": {}},
+			ScopeDone: map[string]ScopeDone{missScope: {Complete: true, Types: map[string]bool{"aws_instance": true}}},
+			TypeDone:  map[string]bool{"aws_instance": true},
+		},
+		Filters: &Filters{},
 	}
 	for _, id := range ids {
 		inv.Resources = append(inv.Resources, Resource{
@@ -135,10 +140,26 @@ func TestIncompleteListingsMarkNothingMissing(t *testing.T) {
 		"totals count left out ones":       func(i *Inventory) { i.Coverage.Totals.LeftOut = 1 },
 		"totals count excluded, no scopes": func(i *Inventory) { i.Coverage.Totals.Excluded = 1; i.Coverage.Scopes = nil },
 		"it does not say how complete":     func(i *Inventory) { i.Coverage = nil },
-		"an OCSF inventory":                func(i *Inventory) { i.Schema = SchemaOCSFInventory; i.Coverage = nil },
-		"another region was listed":        func(i *Inventory) { i.Scopes = []string{"aws/" + missAcct + "/us-east-1"} },
-		"another account was listed":       func(i *Inventory) { i.Scopes = []string{"aws/999999999999/" + missRegion} },
-		"it does not list the type":        func(i *Inventory) { i.Resources = nil },
+		"scope is not complete": func(i *Inventory) {
+			i.Coverage.ScopeDone[missScope] = ScopeDone{Types: map[string]bool{"aws_instance": true}}
+		},
+		"scope says nothing of completion": func(i *Inventory) { i.Coverage.ScopeDone = nil },
+		"type is not in complete_types": func(i *Inventory) {
+			i.Coverage.ScopeDone[missScope] = ScopeDone{Complete: true, Types: map[string]bool{"aws_vpc": true}}
+		},
+		"type is not complete":            func(i *Inventory) { i.Coverage.TypeDone["aws_instance"] = false },
+		"type says nothing of completion": func(i *Inventory) { i.Coverage.TypeDone = nil },
+		"filters not given":               func(i *Inventory) { i.Filters = nil },
+		"filters.id":                      func(i *Inventory) { i.Filters.ID = true },
+		"filters.tag":                     func(i *Inventory) { i.Filters.Tag = true },
+		"filters.where":                   func(i *Inventory) { i.Filters.Where = true },
+		"filters.services":                func(i *Inventory) { i.Filters.Services = true },
+		"filters.group":                   func(i *Inventory) { i.Filters.Group = true },
+		"filters.partial":                 func(i *Inventory) { i.Filters.Partial = true },
+		"an OCSF inventory":               func(i *Inventory) { i.Schema = SchemaOCSFInventory; i.Coverage = nil },
+		"another region was listed":       func(i *Inventory) { i.Scopes = []string{"aws/" + missAcct + "/us-east-1"} },
+		"another account was listed":      func(i *Inventory) { i.Scopes = []string{"aws/999999999999/" + missRegion} },
+		"it does not list the type":       func(i *Inventory) { i.Resources = nil },
 		"a resource was left out": func(i *Inventory) {
 			i.Resources = append(i.Resources, Resource{Cloud: "aws", Type: "aws_instance", ID: "ghp_" + strings.Repeat("a1B2", 9)})
 		},
@@ -244,7 +265,12 @@ func azureListing(ids ...string) Inventory {
 	scope := "azure/" + strings.ToLower(vnetSub) + "/global"
 	inv := Inventory{
 		Location: "azure.inventory.json", Schema: SchemaInventory, Tool: "infraharvest", Scopes: []string{scope},
-		Coverage: &Coverage{Scopes: map[string]Counts{scope: {}}, Types: map[string]Counts{"azurerm_virtual_network": {}}},
+		Coverage: &Coverage{
+			Scopes: map[string]Counts{scope: {}}, Types: map[string]Counts{"azurerm_virtual_network": {}},
+			ScopeDone: map[string]ScopeDone{scope: {Complete: true, Types: map[string]bool{"azurerm_virtual_network": true}}},
+			TypeDone:  map[string]bool{"azurerm_virtual_network": true},
+		},
+		Filters: &Filters{},
 	}
 	for _, id := range ids {
 		inv.Resources = append(inv.Resources, Resource{
@@ -277,8 +303,9 @@ func TestAzureIDsOfAnotherCaseJoinAndAreNotMissing(t *testing.T) {
 
 // docOf is an inventory/v1 document that lists two of the three instances of
 // the state in the scope, with the given coverage member (the whole, with its
-// key, "" for a document without one).
-func docOf(coverage string) string {
+// key, "" for a document without one) and the given filters member ("" for a
+// document without one, as an earlier release wrote).
+func docOf(coverage, filters string) string {
 	doc := `{"schema":"infraharvest/inventory/v1","generated_at":"2026-11-25T09:30:00Z","tool":{"name":"infraharvest","version":"0.9.0"},"cloud":"aws",
 	 "scopes":["` + missScope + `"],
 	 "resources":[
@@ -287,35 +314,48 @@ func docOf(coverage string) string {
 	if coverage != "" {
 		doc += `,"coverage":` + coverage
 	}
+	if filters != "" {
+		doc += `,"filters":` + filters
+	}
 	return doc + "}"
 }
 
-const completeCoverage = `{"totals":{"failed":0},"types":[{"type":"aws_instance","counts":{"failed":0}}],"scopes":[{"scope":"` + missScope + `","counts":{"failed":0}}]}`
+const noFilters = `{"id":false,"tag":false,"where":false,"services":false,"group":false,"partial":false}`
+
+const completeCoverage = `{"totals":{"failed":0},"types":[{"type":"aws_instance","complete":true,"counts":{"failed":0}}],` +
+	`"scopes":[{"scope":"` + missScope + `","complete":true,"complete_types":["aws_instance"],"counts":{"failed":0}}]}`
 
 func TestCoverageThatIsNotWhole(t *testing.T) {
 	cases := map[string]struct {
 		coverage string
 		missing  bool
 	}{
-		"whole":                {completeCoverage, true},
-		"whole, counts all 0":  {`{"totals":{"failed":0,"excluded":0,"left_out":0},"types":[],"scopes":[]}`, true},
-		"empty":                {`{}`, false},
-		"null":                 {`null`, false},
-		"no key":               {``, false},
-		"totals only":          {`{"totals":{"failed":0}}`, false},
-		"no totals":            {`{"types":[],"scopes":[]}`, false},
-		"no types":             {`{"totals":{"failed":0},"scopes":[]}`, false},
-		"no scopes":            {`{"totals":{"failed":0},"types":[]}`, false},
-		"excluded in totals":   {`{"totals":{"excluded":2},"types":[],"scopes":[]}`, false},
-		"left out in totals":   {`{"totals":{"left_out":1},"types":[],"scopes":[]}`, false},
-		"excluded in the type": {`{"totals":{},"types":[{"type":"aws_instance","counts":{"excluded":2}}],"scopes":[]}`, false},
-		"excluded in scope":    {`{"totals":{},"types":[],"scopes":[{"scope":"` + missScope + `","counts":{"excluded":2}}]}`, false},
-		"left out in the type": {`{"totals":{},"types":[{"type":"aws_instance","counts":{"left_out":1}}],"scopes":[]}`, false},
-		"left out in scope":    {`{"totals":{},"types":[],"scopes":[{"scope":"` + missScope + `","counts":{"left_out":1}}]}`, false},
+		"whole":                      {completeCoverage, true},
+		"old document":               {`{"totals":{"failed":0,"excluded":0,"left_out":0},"types":[],"scopes":[]}`, false},
+		"old document, types":        {`{"totals":{"failed":0},"types":[{"type":"aws_instance","counts":{"failed":0}}],"scopes":[{"scope":"` + missScope + `","counts":{"failed":0}}]}`, false},
+		"scope not complete":         {`{"totals":{},"types":[{"type":"aws_instance","complete":true,"counts":{}}],"scopes":[{"scope":"` + missScope + `","complete":false,"complete_types":["aws_instance"],"counts":{}}]}`, false},
+		"type not in complete_types": {`{"totals":{},"types":[{"type":"aws_instance","complete":true,"counts":{}}],"scopes":[{"scope":"` + missScope + `","complete":true,"complete_types":["aws_vpc"],"counts":{}}]}`, false},
+		"type not complete":          {`{"totals":{},"types":[{"type":"aws_instance","complete":false,"counts":{}}],"scopes":[{"scope":"` + missScope + `","complete":true,"complete_types":["aws_instance"],"counts":{}}]}`, false},
+		// A type the document found none of has no entry; the scope's
+		// complete types say it was listed.
+		"type without an entry": {`{"totals":{},"types":[],"scopes":[{"scope":"` + missScope + `","complete":true,"complete_types":["aws_instance"],"counts":{}}]}`, true},
+		"empty":                 {`{}`, false},
+		"null":                  {`null`, false},
+		"no key":                {``, false},
+		"totals only":           {`{"totals":{"failed":0}}`, false},
+		"no totals":             {`{"types":[],"scopes":[]}`, false},
+		"no types":              {`{"totals":{"failed":0},"scopes":[]}`, false},
+		"no scopes":             {`{"totals":{"failed":0},"types":[]}`, false},
+		"excluded in totals":    {`{"totals":{"excluded":2},"types":[],"scopes":[]}`, false},
+		"left out in totals":    {`{"totals":{"left_out":1},"types":[],"scopes":[]}`, false},
+		"excluded in the type":  {`{"totals":{},"types":[{"type":"aws_instance","counts":{"excluded":2}}],"scopes":[]}`, false},
+		"excluded in scope":     {`{"totals":{},"types":[],"scopes":[{"scope":"` + missScope + `","counts":{"excluded":2}}]}`, false},
+		"left out in the type":  {`{"totals":{},"types":[{"type":"aws_instance","counts":{"left_out":1}}],"scopes":[]}`, false},
+		"left out in scope":     {`{"totals":{},"types":[],"scopes":[{"scope":"` + missScope + `","counts":{"left_out":1}}]}`, false},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			inv, err := parseInventoryV1([]byte(docOf(c.coverage)))
+			inv, err := parseInventoryV1([]byte(docOf(c.coverage, noFilters)))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -328,5 +368,50 @@ func TestCoverageThatIsNotWhole(t *testing.T) {
 				t.Errorf("i-0003 missing is %v, want %v", got, c.missing)
 			}
 		})
+	}
+}
+
+func TestFiltersOfTheDocument(t *testing.T) {
+	cases := map[string]struct {
+		filters string
+		missing bool
+	}{
+		"none used":         {noFilters, true},
+		"no filters member": {``, false},
+		"null":              {`null`, false},
+		"empty":             {`{}`, false},
+		"a kind left out":   {`{"id":false,"tag":false,"where":false,"services":false,"group":false}`, false},
+		"id":                {strings.Replace(noFilters, `"id":false`, `"id":true`, 1), false},
+		"tag":               {strings.Replace(noFilters, `"tag":false`, `"tag":true`, 1), false},
+		"where":             {strings.Replace(noFilters, `"where":false`, `"where":true`, 1), false},
+		"services":          {strings.Replace(noFilters, `"services":false`, `"services":true`, 1), false},
+		"group":             {strings.Replace(noFilters, `"group":false`, `"group":true`, 1), false},
+		"partial":           {strings.Replace(noFilters, `"partial":false`, `"partial":true`, 1), false},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			inv, err := parseInventoryV1([]byte(docOf(completeCoverage, c.filters)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			inv.Location, inv.Schema = "aws.inventory.json", SchemaInventory
+			for i := range inv.Resources {
+				inv.Resources[i].CloudID = instanceARN(inv.Resources[i].ID)
+			}
+			res := buildMissing(t, missingState(t, []string{"i-0001", "i-0002", "i-0003"}), readsOf(inv))
+			if got := statusOf(t, res, "aws_instance", "i-0003") == snapshot.Missing; got != c.missing {
+				t.Errorf("i-0003 missing is %v, want %v", got, c.missing)
+			}
+		})
+	}
+}
+
+// Nothing joined in the account: the IDs of the type are not known to compare,
+// whatever the document says it listed in full.
+func TestNothingJoinedMarksNothingMissing(t *testing.T) {
+	inv := awsListing()
+	res := buildMissing(t, missingState(t, []string{"i-0001"}), readsOf(inv))
+	if got := statusOf(t, res, "aws_instance", "i-0001"); got == snapshot.Missing {
+		t.Errorf("nothing joined, so the IDs of the type are not known to compare: %q", got)
 	}
 }

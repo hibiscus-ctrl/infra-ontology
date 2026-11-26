@@ -1,7 +1,7 @@
 {
   "format": "infra-ontology/snapshot/v1",
   "format_minor": 1,
-  "snapshot_id": "bebb9abc7edda67648d328bf301d7bc041e42d1fce3cbdbec1b0c1099395ffe6",
+  "snapshot_id": "a410092b8439e05356eb2b902fa17ff296dede1e05c86982d08ddf43ebc2696b",
   "parent_id": "",
   "label": "fixture",
   "created_at": "2026-11-25T12:00:00Z",
@@ -28,7 +28,7 @@
     {
       "name": "sources",
       "file": "sources.parquet",
-      "sha256": "d12ccf41ab19c71d7ef3e6a2f5edd5105f457957910e77306917b9795062cc61",
+      "sha256": "c4e29a8051ed1dea40f2250d3df908c4ab0a2ba780ba7d72ae161bc196a3f7cb",
       "rows": 8,
       "schema": "infra-ontology/source/v1"
     }

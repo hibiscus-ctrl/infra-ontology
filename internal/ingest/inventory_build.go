@@ -192,7 +192,7 @@ func (b *builder) mergeResource(merged map[invKey]*invResource, inv Inventory, s
 	r.Account, r.Region = firstOf(sc.account, res.Account), firstOf(sc.region, res.Region)
 	k := invKey{res.Cloud, r.Account, r.tfType, sc.id}
 	if l := b.listings[source]; l != nil {
-		l.add(k, r.Region, sc.id, inv.IDsHashed)
+		l.add(k, sc.id, inv.IDsHashed)
 	}
 	old, ok := merged[k]
 	if !ok {

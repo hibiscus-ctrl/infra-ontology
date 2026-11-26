@@ -28,11 +28,14 @@ type listing struct {
 	// (its ID looks like a credential), so that it is not known to be absent.
 	leftOut bool
 	// keys are the resources it lists, as the build merges them (see
-	// invKey); listed the places it lists a type in, "cloud|account|region|
-	// type"; groups the Azure resource groups it lists a resource in.
+	// invKey); groups the Azure resource groups it lists a resource in.
 	keys   map[string]bool
-	listed map[string]bool
 	groups map[string]bool
+	// scopeDone says, for each scope the document calls complete, the
+	// Terraform types it lists in full there; typeDone the types it calls
+	// complete. Absent is not complete.
+	scopeDone map[string]map[string]bool
+	typeDone  map[string]bool
 	// proven holds the (cloud, account, type) of the states' resources this
 	// listing joined: IDs of that type compare between state and inventory.
 	proven map[string]bool
@@ -41,24 +44,33 @@ type listing struct {
 func newListing(source string, inv Inventory, canonical func(string) string) *listing {
 	l := &listing{
 		source: source, inv: inv, types: map[string]Counts{},
-		keys: map[string]bool{}, listed: map[string]bool{}, groups: map[string]bool{}, proven: map[string]bool{},
+		keys: map[string]bool{}, groups: map[string]bool{}, proven: map[string]bool{},
+		scopeDone: map[string]map[string]bool{}, typeDone: map[string]bool{},
 	}
 	if inv.Coverage != nil {
 		for typ, c := range inv.Coverage.Types {
 			t := canonical(typ)
 			l.types[t] = addCounts(l.types[t], c)
 		}
+		// Two types of the document may be one Terraform type: complete only
+		// where each is.
+		for typ, done := range inv.Coverage.TypeDone {
+			t := canonical(typ)
+			prev, seen := l.typeDone[t]
+			l.typeDone[t] = done && (!seen || prev)
+		}
+		for scope, d := range inv.Coverage.ScopeDone {
+			if !d.Complete {
+				continue
+			}
+			types := make(map[string]bool, len(d.Types))
+			for typ := range d.Types {
+				types[canonical(typ)] = true
+			}
+			l.scopeDone[scope] = types
+		}
 	}
 	return l
-}
-
-// place is the key of a type listed in an account and a region. Azure
-// resource IDs say no region, so its places have none.
-func place(cloud, account, region, typ string) string {
-	if cloud == "azure" {
-		region = ""
-	}
-	return strings.Join([]string{cloud, accountKey(cloud, account), region, typ}, "|")
 }
 
 // accountKey folds an Azure subscription to lower case, as the IDs are.
@@ -70,13 +82,10 @@ func accountKey(cloud, account string) string {
 }
 
 // add notes a resource the document lists.
-func (l *listing) add(k invKey, region, id string, hashed bool) {
+func (l *listing) add(k invKey, id string, hashed bool) {
 	l.keys[k.String()] = true
 	if k.account == "" {
 		return
-	}
-	if region != "" || k.cloud == "azure" {
-		l.listed[place(k.cloud, k.account, region, k.typ)] = true
 	}
 	if k.cloud == "azure" && !hashed {
 		if g := azureGroup(id); g != "" {
@@ -102,14 +111,15 @@ func cloudOfScope(provider string) string { return cloudNames[provider] }
 
 // usable says the document can show that a resource is missing at all: it is
 // an inventory/v1 document that says how complete it is (totals, types and
-// scopes), in which no import failed, the selection of the run left no
-// resource out and no resource was left out of the import (an infraharvest
-// run with --id, --tag, --where, include or exclude lists only some of what is
-// there), with no resource of it left out of the snapshot, and which, if it
+// scopes, and the filters of the run), in which no kind of filter narrowed
+// the listing (--id, --tag, --where, --services or --skip, one group, a
+// listing in part), no import failed, the selection of the run left no
+// resource out and no resource was left out of the import (include or
+// exclude lists only some of what is there), with no resource of it left out of the snapshot, and which, if it
 // hashes its IDs, was matched to the states with their key.
 func (b *builder) usable(l *listing) bool {
 	switch {
-	case l.inv.Schema != SchemaInventory, l.inv.Coverage == nil, l.inv.Failed > 0, l.leftOut:
+	case l.inv.Schema != SchemaInventory, l.inv.Coverage == nil, l.inv.Filters == nil, l.inv.Filters.Any(), l.inv.Failed > 0, l.leftOut:
 		return false
 	case l.inv.IDsHashed && (b.key == nil || b.mismatched[l.source]):
 		return false
@@ -120,9 +130,11 @@ func (b *builder) usable(l *listing) bool {
 
 // covers says the listing lists the type of n in the account and region of n
 // in full: every scope of the document that is the account and region has
-// no failed, skipped, excluded or left-out resource, the type has none,
-// the document lists the type there, and its IDs of the type compare to state (a resource of the
-// type was joined). For Azure, which has no region in an ID, the account is
+// no failed, skipped, excluded or left-out resource, is complete and names
+// the type among those it listed in full (those it found none of too), the type
+// has no failed, skipped, excluded or left-out resource and, where the
+// document has an entry for it, is complete, and its IDs of the type compare
+// to state (a resource of the type was joined). For Azure, which has no region in an ID, the account is
 // the scope, and the listing must list the resource group of n too: a listing
 // of one group is not a listing of the subscription.
 func (b *builder) covers(l *listing, n snapshot.Node) bool {
@@ -147,7 +159,7 @@ func (b *builder) covers(l *listing, n snapshot.Node) bool {
 		if !ok {
 			counts = c.Totals
 		}
-		if !counts.Complete() {
+		if !counts.Complete() || !l.scopeDone[s][n.TFType] {
 			return false
 		}
 	}
@@ -161,7 +173,12 @@ func (b *builder) covers(l *listing, n snapshot.Node) bool {
 	if !counts.Complete() {
 		return false
 	}
-	if !l.listed[place(n.Cloud, n.Account, n.Region, n.TFType)] || !l.proven[n.Cloud+"|"+accountKey(n.Cloud, n.Account)+"|"+n.TFType] {
+	// A type the document found none of has no entry: the scope's complete
+	// types are what says it was listed.
+	if _, ok := l.types[n.TFType]; ok && !l.typeDone[n.TFType] {
+		return false
+	}
+	if !l.proven[n.Cloud+"|"+accountKey(n.Cloud, n.Account)+"|"+n.TFType] {
 		return false
 	}
 	if n.Cloud == "azure" {
