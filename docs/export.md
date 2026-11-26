@@ -34,7 +34,7 @@ graph/v1 cannot say these, so the export leaves them out:
 - Tags, names, ARNs and resource paths. A graph/v1 document holds no names and no attribute values, which is why a picture of it can be shared.
 - Managed status (managed, other IaC, unmanaged, unknown, missing), confidence, sources and the manifest's coverage, limits and parent. An unmanaged resource is drawn like a managed one.
 - State roots, accounts and the placeholders for state that was referenced but not read.
-- Every edge kind but `depends_on`: containment of a module call in another module or in a state root, `defined_in`, `reads_state_of` and any kind a later version adds. Only a resource's containment in a module call survives, as its parent, so a nested module call is not drawn inside its parent.
+- Every edge kind but `depends_on`: containment of a module call in another module or in a state root, `defined_in`, `reads_state_of`, `can_assume` and any kind a later version adds. Only a resource's containment in a module call survives, as its parent, so a nested module call is not drawn inside its parent.
 - Resources of the other clouds, resources with no cloud, and resources with no type or no id.
 - Where a module comes from, and its version.
 

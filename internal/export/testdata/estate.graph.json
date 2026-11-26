@@ -1,6 +1,6 @@
 {
   "schema": "infraharvest/graph/v1",
-  "run_id": "696acef9-ca51-5357-a979-9e1477f0c2a1",
+  "run_id": "e54bf901-7fb4-5db8-a081-e6a1da9831fc",
   "generated_at": "2026-11-25T10:15:00Z",
   "tool": {
     "name": "infra-ontology",

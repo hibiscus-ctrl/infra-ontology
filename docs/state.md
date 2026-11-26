@@ -33,6 +33,7 @@ State holds secrets, in attributes, in outputs and in the configuration of `terr
 - the address, type, provider, module path and dependencies of each instance;
 - its `id` and `arn` (and, for a resource with neither, its resource identity, which is used for the account and region only);
 - its tags, or its labels on Google Cloud, for a managed resource and not for a data source (a data source's tags are the looked-up resource's, not one this state manages): the `tags` and `tags_all` attributes (AWS and Azure; `tags_all` wins where the two differ, so a provider's default tags are in) and the `labels` attribute, string values only, after the secret detectors (see below);
+- for an `aws_iam_role`, who its trust policy names: each statement's effect, its principals, whether it can assume the role and whether it has a condition (see [Who can assume a role](#who-can-assume-a-role)), never the policy's text;
 - the names of the outputs, never their values;
 - the place each `terraform_remote_state` reads from: its backend, bucket or container, key or prefix, organization and workspace, never a credential.
 
@@ -54,12 +55,34 @@ A test builds a snapshot from states that hold planted secrets in attributes, ou
 | `dependencies` | a `depends_on` edge (`state_dependency`, observed). A dependency has no instance key, so it reaches every instance of `count` and `for_each`, and a dependency on a module reaches the module call |
 | a module path | a `module_call` node for each call, and `contained_in` edges (`module_containment`, computed) from a resource to its module call, a call to the call around it, and a top-level call to the state root |
 | `terraform_remote_state` | a `reads_state_of` edge (`remote_state`, observed) from its data node to the state root of the state it reads, when that state is among the sources; otherwise to an `external` placeholder node, and `limits` names it |
+| an `aws_iam_role`'s trust policy | `can_assume` edges from the principals it names to the role (see [Who can assume a role](#who-can-assume-a-role)) |
 
 Edges follow `graph/v1`: `from` refers to, or depends on, `to`. So what a change breaks follows edges backwards from the thing that changes, across states through the `remote_state` edges.
 
 A `terraform_remote_state` is matched to a source by the backend's own naming: bucket and key (and `env:/<workspace>/` for a workspace of the S3 backend), bucket and prefix with `<workspace>.tfstate` for Cloud Storage, account, container and key (and `env:<workspace>`) for Azure, organization and workspace for HCP Terraform, and, for a local backend, a source whose path ends with the path the data source names. A path that leaves the data source's own folder (`../net/terraform.tfstate`) cannot be placed and goes to a placeholder.
 
 A resource found in more than one state is one node, listed under the first state read (states are read in order of location), with a `defined_in` edge to each. A data source is identified by the state it is read in, since many states read the same thing.
+
+## Who can assume a role
+
+For each `aws_iam_role` a state holds, the trust policy (`assume_role_policy`) says who may assume it. The reader keeps only the principals each statement names; the snapshot gets a `can_assume` edge from each principal to the role (`from` can assume `to`), which is the first answer to "who can reach this". The policy's text, its `Sid`, its resources and the keys and values of its conditions are dropped while the state is read, and no output holds them.
+
+| The trust policy names | The edge starts at | Confidence and basis |
+| --- | --- | --- |
+| a role or user in the role's account | that role or user, if the snapshot holds it, otherwise an `external` placeholder built from the ARN | `computed`, `trust_policy` |
+| a role or user in another account | the same | `inferred`, `trust_policy_cross_account` |
+| an account (`arn:aws:iam::123456789012:root`, or the 12 digits) | an `account` node | `inferred`, `trust_policy_account` |
+| a service (`ec2.amazonaws.com`; only a name under `amazonaws.com`, `amazonaws.com.cn`, `c2s.ic.gov` or `sc2s.sgov.gov`) | an `external` placeholder of type `service_principal` | `computed`, `trust_policy` |
+| `"*"`, or every principal but those listed (`NotPrincipal`) | one `external` placeholder of type `any_principal` | `inferred`, `trust_policy_wildcard` |
+| an ARN with a wildcard (`arn:aws:iam::123456789012:role/ci-*`) | an `external` placeholder of type `wildcard_principal`, one for each pattern | `inferred`, `trust_policy_wildcard` |
+
+A statement with a `Condition` makes its edges `inferred` (`trust_policy_condition`), and so does a `Deny` statement anywhere in the policy (`trust_policy_deny`): neither is evaluated, and the edge is kept rather than dropped, so a reader sees a possible path and a confidence that says it is only that. Where two statements give the same edge, the stronger confidence wins.
+
+What it does not say. An edge says the trust policy allows the principal in, not that the principal can: identity policies, permission boundaries, service control policies and session policies are not read, and a principal in another account needs an identity policy there too. Only roles a state holds have edges, so a role made outside Terraform has none. A role whose account the state does not give has its role and user principals `inferred`, since they may be of another account. A service that is not named as one, and a bare string that is not `"*"`, make no edge and are never written; `limits` counts them. A role whose policy names more than 500 distinct principals has no edge and counts with the roles whose policy could not be read. Where a data source and a managed role have one ARN, the edge starts at the managed one.
+
+Federated principals (OIDC and SAML providers), canonical users, assumed-role sessions, unique IDs of deleted principals and ARNs of other services are not turned into edges; `limits` counts them, and counts the roles whose policy could not be read. The edges are in the manifest's format from minor version 2 on.
+
+With `--hash-ids`, the native ID, ARN and name of a placeholder are hashed with the other IDs (the account of a principal outside the estate is hashed too, the same for every node of it, while the accounts of the estate stay readable, as does the type), so the same key gives the same edges. `--drop-addresses` has nothing to drop from these edges: they carry no Terraform address.
 
 ## Hashing IDs
 
