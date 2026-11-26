@@ -49,7 +49,7 @@ type scope struct {
 func scopeOf(cloud, id, arn, identityID string) scope {
 	s := scope{id: id}
 	switch {
-	case isAzureID(id):
+	case foldsCase(cloud, id):
 		s.id = strings.ToLower(id)
 		s.path = s.id
 		s.account = segmentAfter(s.id, "subscriptions")
@@ -84,10 +84,19 @@ func scopeOf(cloud, id, arn, identityID string) scope {
 	return s
 }
 
+// azureRoots start the resource IDs of Azure: those in a subscription, and
+// the ones above it (management groups, tenant-wide role definitions).
+var azureRoots = []string{"/subscriptions/", "/providers/", "/tenants/"}
+
 // isAzureID tells an Azure resource ID, which Azure treats without regard to
 // case, from other identifiers.
 func isAzureID(id string) bool {
-	return len(id) > len("/subscriptions/") && strings.EqualFold(id[:len("/subscriptions/")], "/subscriptions/")
+	for _, r := range azureRoots {
+		if len(id) > len(r) && strings.EqualFold(id[:len(r)], r) {
+			return true
+		}
+	}
+	return false
 }
 
 // segmentAfter returns the path segment that follows the segment key in a
@@ -117,4 +126,12 @@ func firstOf(s ...string) string {
 		}
 	}
 	return ""
+}
+
+// foldsCase tells whether id is an Azure resource ID to fold to lower case:
+// one that starts like one and belongs to Azure. Other providers' IDs that
+// happen to start the same way, such as one under /providers/, keep their
+// case: they may tell resources apart by it.
+func foldsCase(cloud, id string) bool {
+	return cloud == "azure" && isAzureID(id)
 }
