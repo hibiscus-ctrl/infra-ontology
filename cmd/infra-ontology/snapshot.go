@@ -279,7 +279,7 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 	dropAllTags := fs.Bool("drop-tags", false, "drop every tag of the inventories' resources")
 	hashIDs := fs.Bool("hash-ids", false, "hash IDs, ARNs, names, Terraform addresses and state locations with HMAC-SHA256, under a key from "+keyEnv+" (or "+secretscan.KeyEnv+") or --hash-key-file")
 	hashKeyFile := fs.String("hash-key-file", "", "the file that holds the key --hash-ids hashes with (16 bytes at least)")
-	dropAddresses := fs.Bool("drop-addresses", false, "leave Terraform resource addresses (and module paths) out of the snapshot's nodes and manifest, to share it outside the team; works with --hash-ids")
+	dropAddresses := fs.Bool("drop-addresses", false, "leave Terraform addresses, module paths and the Terraform names of resources and module calls out of the snapshot's nodes, to share it outside the team; node IDs of module calls, data sources and resources without an ID stay unkeyed hashes of state location and address unless --hash-ids is also used")
 	from := fs.String("from-json", "", "the JSON file of nodes, edges and sources to build from (test and development path)")
 	out := fs.String("out", filepath.Join(".infra-ontology", "snapshots"), "the folder to write the snapshot folder into")
 	label := fs.String("label", "", "a name for the snapshot (overrides the file's)")

@@ -541,7 +541,10 @@ func (b *builder) limits() string {
 		s = append(s, "IDs, names, Terraform addresses and state locations are HMAC-SHA256 hashes under a key this snapshot does not hold; types, accounts, regions and counts are readable.")
 	}
 	if b.o.DropAddresses {
-		s = append(s, "Terraform addresses and module paths are left out of the nodes.")
+		s = append(s, "Terraform addresses, module paths and the Terraform names of resources and module calls are left out of the nodes.")
+		if b.key == nil {
+			s = append(s, "The node IDs of module calls, data sources and resources without an ID are unkeyed SHA-256 hashes of the state location and the address, so a guessed address can be confirmed; --hash-ids keys them.")
+		}
 	}
 	if len(b.externals) > 0 {
 		var locs []string
