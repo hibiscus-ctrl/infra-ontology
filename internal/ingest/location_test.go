@@ -117,7 +117,7 @@ func TestMatching(t *testing.T) {
 		{"unknown backend", "s3://b/k.tfstate", tfstate.RemoteState{Backend: "kubernetes"}, false},
 	} {
 		hit := false
-		for _, want := range consumerKeys(c.rs) {
+		for _, want := range consumerKeys(c.rs, "") {
 			hit = hit || matches(producerKey(c.source), want)
 		}
 		if hit != c.wantHit {
