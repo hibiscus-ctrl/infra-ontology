@@ -21,6 +21,7 @@ import (
 const (
 	BasisCatalogueChild = "catalogue_child"
 	BasisResourcePath   = "resource_path"
+	BasisProject        = "project"
 )
 
 // BackendFile is the backend of an inventory source: a file.
@@ -551,17 +552,73 @@ func (b *builder) inventoryEdges() {
 				}
 			}
 		}
-		if n.Cloud != "azure" || b.invSource[id] == "" {
+		if b.invSource[id] == "" {
 			continue
 		}
-		for _, anc := range azureParents(n.NativeID) {
-			if to := byNative["azure|"+b.h(anc)]; len(to) > 0 && to[0] != id {
-				sort.Strings(to)
-				b.addEdge(snapshot.EdgeContainedIn, BasisResourcePath, snapshot.Computed, id, to[0], b.invSource[id])
-				break
+		switch n.Cloud {
+		case "azure":
+			for _, anc := range azureParents(n.NativeID) {
+				if to := byNative["azure|"+b.h(anc)]; len(to) > 0 && to[0] != id {
+					sort.Strings(to)
+					b.addEdge(snapshot.EdgeContainedIn, BasisResourcePath, snapshot.Computed, id, to[0], b.invSource[id])
+					break
+				}
 			}
+		case "gcp":
+			b.gcpParent(id, n, byNative, parents)
 		}
 	}
+}
+
+// gcpParent puts a Google resource in the resource its ID's path continues
+// from (a table in its dataset, a key in its key ring), or, if the snapshot
+// has none, in its project. The path is compared as written: Google IDs are
+// case-sensitive. The project is a node made from the resource's account, so
+// it is the same node for every resource in it.
+func (b *builder) gcpParent(id string, n snapshot.Node, byNative map[string][]string, catalogueChild map[string][]string) {
+	for _, anc := range gcpParents(n.NativeID) {
+		to := slices.Clone(byNative["gcp|"+b.h(anc)])
+		// A part of a resource (its IAM binding) has its parent's ID too:
+		// the parent is the resource itself.
+		if whole := slices.DeleteFunc(slices.Clone(to), func(t string) bool { return len(catalogueChild[b.nodes[t].TFType]) > 0 }); len(whole) > 0 {
+			to = whole
+		}
+		to = slices.DeleteFunc(to, func(t string) bool { return t == id })
+		if len(to) > 0 {
+			sort.Strings(to)
+			b.addEdge(snapshot.EdgeContainedIn, BasisResourcePath, snapshot.Computed, id, to[0], b.invSource[id])
+			return
+		}
+	}
+	if n.Account == "" {
+		return
+	}
+	project := b.nodeID(snapshot.KindAccount, "gcp", n.Account, "", "", "projects/"+n.Account)
+	if _, ok := b.nodes[project]; !ok {
+		b.nodes[project] = snapshot.Node{
+			NodeID: project, Kind: snapshot.KindAccount, Cloud: "gcp", Account: n.Account,
+			NativeID: "projects/" + n.Account, ManagedStatus: snapshot.Unknown,
+			Confidence: snapshot.Computed, SourceID: b.invSource[id],
+		}
+	}
+	b.addEdge(snapshot.EdgeContainedIn, BasisProject, snapshot.Computed, id, project, b.invSource[id])
+}
+
+// gcpParents lists the paths a Google resource ID such as
+// projects/p/datasets/d/tables/t is inside, nearest first: projects/p/datasets/d,
+// then projects/p/datasets. It stops above the project's own collections. An
+// ID that is not a resource path (a bucket's name, or the short form some
+// resources import by) names none.
+func gcpParents(id string) []string {
+	parts := strings.Split(id, "/")
+	if len(parts) < 4 || parts[0] != "projects" || slices.Contains(parts, "") {
+		return nil
+	}
+	var out []string
+	for n := len(parts) - 1; n >= 3; n-- {
+		out = append(out, strings.Join(parts[:n], "/"))
+	}
+	return out
 }
 
 // isDataAddress says an address is a data source's: what it reads is not
