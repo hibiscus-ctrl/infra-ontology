@@ -54,6 +54,7 @@ type principalRef struct {
 type trustState struct {
 	roles, unreadable, skipped, rejected int
 	arns                                 map[string]string // role and user ARNs of the snapshot, to node IDs
+	own                                  map[string]bool   // accounts of the resources and accounts the snapshot holds
 }
 
 // addTrust adds a can_assume edge, from each principal an aws_iam_role's trust
@@ -63,6 +64,12 @@ type trustState struct {
 // the policy's text was never kept.
 func (b *builder) addTrust(states []*docState) {
 	b.trust.arns = map[string]string{}
+	b.trust.own = map[string]bool{}
+	for _, n := range b.nodes {
+		if n.Account != "" && (n.Kind == snapshot.KindResource || n.Kind == snapshot.KindAccount) {
+			b.trust.own[n.Account] = true
+		}
+	}
 	for id, n := range b.nodes {
 		if n.Kind == snapshot.KindResource && n.Cloud == "aws" && n.ARNOrPath != "" &&
 			(n.TFType == "aws_iam_role" || n.TFType == "aws_iam_user") && !b.preHashed[id+"\x00arn_or_path"] {
@@ -258,10 +265,22 @@ func (b *builder) principal(s *docState, p tfstate.TrustPrincipal, roleAccount s
 	return principalRef{}, principalSkipped
 }
 
+// shown is the account of a principal, as its node says it. The accounts of the
+// estate are readable in a hashed snapshot, as for every node; another account,
+// one a policy names as a partner or a vendor, is hashed with the key, so that
+// the nodes of one account still group.
+func (b *builder) shown(account string) string {
+	if b.key == nil || account == "" || b.trust.own[account] {
+		return account
+	}
+	return b.h(account)
+}
+
 // placeholder adds an external node for a principal the snapshot holds no
 // node for, and returns its ID. Its native ID and ARN are the principal as the
 // policy writes it, so with a key they are hashed with the other IDs.
 func (b *builder) placeholder(s *docState, account, inventoryType, tfType, native string) string {
+	account = b.shown(account)
 	id := b.nodeID(snapshot.KindExternal, "aws", account, "", firstOf(tfType, inventoryType), native)
 	n := snapshot.Node{
 		NodeID: id, Kind: snapshot.KindExternal, Cloud: "aws", Account: account, TFType: tfType,
@@ -278,9 +297,11 @@ func (b *builder) placeholder(s *docState, account, inventoryType, tfType, nativ
 // accountNode adds the node of an AWS account a trust policy names, and
 // returns its ID.
 func (b *builder) accountNode(s *docState, account string) string {
-	id := b.nodeID(snapshot.KindAccount, "aws", account, "", "", account)
+	native := account
+	account = b.shown(account)
+	id := b.nodeID(snapshot.KindAccount, "aws", account, "", "", native)
 	b.addNode(snapshot.Node{
-		NodeID: id, Kind: snapshot.KindAccount, Cloud: "aws", Account: account, NativeID: account,
+		NodeID: id, Kind: snapshot.KindAccount, Cloud: "aws", Account: account, NativeID: native,
 		ManagedStatus: snapshot.Unknown, Confidence: snapshot.Computed, SourceID: s.source,
 	})
 	return id

@@ -82,7 +82,7 @@ What it does not say. An edge says the trust policy allows the principal in, not
 
 Federated principals (OIDC and SAML providers), canonical users, assumed-role sessions, unique IDs of deleted principals and ARNs of other services are not turned into edges; `limits` counts them, and counts the roles whose policy could not be read. The edges are in the manifest's format from minor version 2 on.
 
-With `--hash-ids`, the native ID, ARN and name of a placeholder are hashed with the other IDs (the account stays readable, as for every node, and so does its type), so the same key gives the same edges. `--drop-addresses` has nothing to drop from these edges: they carry no Terraform address.
+With `--hash-ids`, the native ID, ARN and name of a placeholder are hashed with the other IDs (the account of a principal outside the estate is hashed too, the same for every node of it, while the accounts of the estate stay readable, as does the type), so the same key gives the same edges. `--drop-addresses` has nothing to drop from these edges: they carry no Terraform address.
 
 ## Hashing IDs
 

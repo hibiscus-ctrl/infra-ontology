@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/IgnatG/infraharvest/pkg/secretscan"
 	"github.com/IgnatG/infraharvest/pkg/tfstate"
 
 	"github.com/hibiscus-ctrl/infra-ontology/internal/snapshot"
@@ -216,10 +217,10 @@ func TestCanAssumeHashedAndDropped(t *testing.T) {
 				}
 			}
 			if hashed {
-				// The account of a principal stays readable, as every account does.
+				// The account of a principal that is not one of the estate is hashed too, the same for each node of it.
 				found := false
 				for _, n := range res.Tables.Nodes {
-					found = found || n.Kind == snapshot.KindExternal && n.Account == "222222222222" && len(n.ARNOrPath) == 64
+					found = found || n.Kind == snapshot.KindExternal && n.Account == secretscan.Hash(testKey, "222222222222") && len(n.ARNOrPath) == 64
 				}
 				if !found {
 					t.Error("no hashed placeholder of the partner role")
@@ -408,5 +409,63 @@ func TestTrustPrincipalShapes(t *testing.T) {
 	}
 	if err := snapshot.Validate(&tb); err != nil {
 		t.Errorf("the rows are not consistent: %v", err)
+	}
+}
+
+// The account of a principal that is not one of the snapshot's own is hashed
+// under a key, in a node of any kind, and still groups the nodes of that
+// account; the accounts of the estate stay readable.
+func TestTrustForeignAccountsHashed(t *testing.T) {
+	const planted, own = "987654321098", "111111111111"
+	reads := func() []Read {
+		return []Read{stateRead(t, iamRoot,
+			roleResource(t, "a", policy(
+				allow(`{"AWS":"arn:aws:iam::`+planted+`:role/vendor"}`, ""),
+				allow(`{"AWS":"arn:aws:iam::`+planted+`:root"}`, ""),
+				allow(`{"AWS":"`+planted+`"}`, ""),
+				allow(`{"AWS":"arn:aws:iam::`+planted+`:role/ci-*"}`, ""),
+				allow(`{"AWS":"arn:aws:iam::`+own+`:root"}`, ""))))}
+	}
+	for name, c := range map[string]struct {
+		key  []byte
+		drop bool
+	}{"plain": {nil, false}, "hashed": {testKey, false}, "dropped": {nil, true}, "both": {testKey, true}} {
+		t.Run(name, func(t *testing.T) {
+			o := hashedOpts(c.key)
+			o.DropAddresses = c.drop
+			res, err := Build(reads(), o)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, _ := json.Marshal(res)
+			hashed := c.key != nil
+			if got := strings.Contains(string(raw), planted); got == hashed {
+				t.Errorf("hashed=%v, planted account in the output: %v", hashed, got)
+			}
+			if !strings.Contains(string(raw), `"account":"`+own+`"`) {
+				t.Error("the account of the estate is not readable")
+			}
+			want := planted
+			if hashed {
+				want = secretscan.Hash(testKey, planted)
+			}
+			foreign := 0
+			for _, n := range res.Tables.Nodes {
+				switch {
+				case n.Account == want:
+					foreign++
+				case n.Account != own && n.Account != "":
+					t.Errorf("a node of another account: %+v", n)
+				}
+			}
+			// The role, the root principal, the 12 digits and the wildcard ARN: the
+			// root principal and the digits are one account node.
+			if foreign != 3 {
+				t.Errorf("%d nodes of the foreign account, want 3", foreign)
+			}
+			if err := snapshot.Validate(&res.Tables); err != nil {
+				t.Errorf("the rows are not consistent: %v", err)
+			}
+		})
 	}
 }
