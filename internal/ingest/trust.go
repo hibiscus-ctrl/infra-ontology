@@ -170,7 +170,11 @@ func (b *builder) principal(s *docState, p tfstate.TrustPrincipal, roleAccount s
 		return principalRef{b.accountNode(s, acct), BasisTrustAccount, snapshot.Inferred}, true
 	case strings.HasPrefix(res, "role/") || strings.HasPrefix(res, "user/"):
 		basis, conf := BasisTrustPolicy, snapshot.Computed
-		if roleAccount != "" && acct != roleAccount {
+		switch {
+		case roleAccount == "":
+			// The role's account is not known, so the principal may be of another.
+			conf = snapshot.Inferred
+		case acct != roleAccount:
 			basis, conf = BasisTrustCrossAccount, snapshot.Inferred
 		}
 		if id, ok := b.trust.arns[p.Value]; ok {

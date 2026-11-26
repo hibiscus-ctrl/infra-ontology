@@ -305,3 +305,19 @@ func TestTrustPrefersManagedRole(t *testing.T) {
 		}
 	}
 }
+
+// A role whose account the state does not give cannot say that a role it
+// trusts is of the same account: the edge is inferred, not computed.
+func TestTrustRoleWithoutAccountIsInferred(t *testing.T) {
+	p, _ := json.Marshal(policy(allow(`{"AWS":"arn:aws:iam::111111111111:role/ci"}`, "")))
+	noARN := `{"mode":"managed","type":"aws_iam_role","name":"bare","provider":"provider[\"registry.terraform.io/hashicorp/aws\"]",
+	 "instances":[{"attributes":{"id":"bare","assume_role_policy":` + string(p) + `}}]}`
+	res := build(t, []Read{stateRead(t, iamRoot, noARN)})
+	if a := nodeAt(t, res.Tables, iamRoot, "aws_iam_role.bare").Account; a != "" {
+		t.Fatalf("the role has account %q, the test needs none", a)
+	}
+	es := canAssume(t, res.Tables, "bare")
+	if len(es) != 1 || es[0].Confidence != snapshot.Inferred || es[0].Basis != BasisTrustPolicy {
+		t.Errorf("edge: %+v", es)
+	}
+}
