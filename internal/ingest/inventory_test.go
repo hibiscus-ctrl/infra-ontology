@@ -117,8 +117,8 @@ func TestInventoryResourcesJoinTheStateNodes(t *testing.T) {
 		t.Errorf("limits: %s", res.Limits)
 	}
 	// Nothing joined makes a second node: the nodes added are the ones only
-	// an inventory lists.
-	if added := len(tb.Nodes) - len(stateOnly.Tables.Nodes); added != 10 {
+	// an inventory lists, and the Google project they are in.
+	if added := len(tb.Nodes) - len(stateOnly.Tables.Nodes); added != 11 {
 		t.Errorf("%d nodes added", added)
 	}
 }
@@ -254,7 +254,8 @@ func TestInventoryAlone(t *testing.T) {
 		t.Errorf("limits: %s", res.Limits)
 	}
 	for _, n := range res.Tables.Nodes {
-		if n.Kind != snapshot.KindResource {
+		// The Google project is the one node that is not a resource.
+		if n.Kind != snapshot.KindResource && (n.Kind != snapshot.KindAccount || n.Cloud != "gcp") {
 			t.Errorf("node: %+v", n)
 		}
 	}
@@ -344,7 +345,7 @@ func TestBadInventoryIsAFailedSource(t *testing.T) {
 			t.Errorf("%s: %+v", b.name, s)
 		}
 	}
-	if len(failed) != len(bad)+1 || len(res.Tables.Nodes) != 2 {
+	if len(failed) != len(bad)+1 || len(res.Tables.Nodes) != 3 {
 		t.Errorf("%d failed sources, %d nodes", len(failed), len(res.Tables.Nodes))
 	}
 

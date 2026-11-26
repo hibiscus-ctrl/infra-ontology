@@ -67,14 +67,15 @@ If any inventory file could not be read, nothing is marked `missing`: the one th
 
 ## Edges
 
-Both are `contained_in` edges from the resource to the one around it, `computed` from identifiers, and cite the inventory that lists the resource. They are made only where an inventory is one end, so a snapshot of state alone has neither.
+All are `contained_in` edges from the resource to the one around it, `computed` from identifiers, and cite the inventory that lists the resource. They are made only where an inventory is one end, so a snapshot of state alone has neither.
 
 | `basis` | Where |
 | --- | --- |
 | `catalogue_child` | The infraharvest catalogue lists a type as a part of another (the versioning of an S3 bucket, its encryption and its policy), and a resource of the first has the same ID as one of the second: `aws_s3_bucket_versioning` `acme-logs` is in `aws_s3_bucket` `acme-logs`. Resources whose ID is not their parent's (a listener, whose ID is its own ARN) get no edge |
-| `resource_path` | An Azure resource ID names its parent: `.../virtualNetworks/v/subnets/s` is in `.../virtualNetworks/v`, and a top-level resource is in its resource group. The edge goes to the nearest of them that is a node of the snapshot |
+| `resource_path` | A resource ID names its parent. In Azure, `.../virtualNetworks/v/subnets/s` is in `.../virtualNetworks/v`, and a top-level resource is in its resource group. In Google, `projects/p/datasets/d/tables/t` is in `projects/p/datasets/d`. The edge goes to the nearest of them that is a node of the snapshot, and Google paths are compared as written, in the same case |
+| `project` | A Google resource that no `resource_path` edge places is in its project: an `account` node with the native ID `projects/<project>`, made from the account the inventory (or the ID's `projects/<project>` path) gives the resource, and the same node for every resource in the project. The node has no address, no tags and the status `unknown`; with `--hash-ids` its native ID is hashed like the others |
 
-Google resource paths and AWS ARNs name no parent, so they get `catalogue_child` edges only. Account nodes are not made.
+AWS ARNs name no parent, so they get `catalogue_child` edges only. A Google ID names only what its own path says: a subnetwork's ID (`projects/p/regions/r/subnetworks/s`) does not name its network, a topic's subscription does not name the topic, and a bucket's name is no path, so those are in their project and not in the resource they refer to. Folders and the organization are not in an inventory, so no node or edge is made for them. An inventory exported with `--hash-ids` has no path to read, so its Google resources are in their project (from the account it keeps in clear) and in nothing nearer; build with `--hash-ids` yourself from an unhashed inventory to keep the paths.
 
 ## What a snapshot keeps
 

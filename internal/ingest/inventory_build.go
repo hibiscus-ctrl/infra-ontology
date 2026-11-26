@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"iter"
 	"slices"
 	"sort"
 	"strings"
@@ -21,6 +22,7 @@ import (
 const (
 	BasisCatalogueChild = "catalogue_child"
 	BasisResourcePath   = "resource_path"
+	BasisProject        = "project"
 )
 
 // BackendFile is the backend of an inventory source: a file.
@@ -551,14 +553,82 @@ func (b *builder) inventoryEdges() {
 				}
 			}
 		}
-		if n.Cloud != "azure" || b.invSource[id] == "" {
+		if b.invSource[id] == "" {
 			continue
 		}
-		for _, anc := range azureParents(n.NativeID) {
-			if to := byNative["azure|"+b.h(anc)]; len(to) > 0 && to[0] != id {
-				sort.Strings(to)
-				b.addEdge(snapshot.EdgeContainedIn, BasisResourcePath, snapshot.Computed, id, to[0], b.invSource[id])
-				break
+		switch n.Cloud {
+		case "azure":
+			for anc := range azureAncestors(n.NativeID) {
+				if to := byNative["azure|"+b.h(anc)]; len(to) > 0 && to[0] != id {
+					sort.Strings(to)
+					b.addEdge(snapshot.EdgeContainedIn, BasisResourcePath, snapshot.Computed, id, to[0], b.invSource[id])
+					break
+				}
+			}
+		case "gcp":
+			b.gcpParent(id, n, byNative, parents)
+		}
+	}
+}
+
+// gcpParent puts a Google resource in the resource its ID's path continues
+// from (a table in its dataset, a key in its key ring), or, if the snapshot
+// has none, in its project. The path is compared as written: Google IDs are
+// case-sensitive. The project is a node made from the resource's account, so
+// it is the same node for every resource in it.
+func (b *builder) gcpParent(id string, n snapshot.Node, byNative map[string][]string, catalogueChild map[string][]string) {
+	for anc := range gcpAncestors(n.NativeID) {
+		to := slices.Clone(byNative["gcp|"+b.h(anc)])
+		// A part of a resource (its IAM binding) has its parent's ID too:
+		// the parent is the resource itself.
+		if whole := slices.DeleteFunc(slices.Clone(to), func(t string) bool { return len(catalogueChild[b.nodes[t].TFType]) > 0 }); len(whole) > 0 {
+			to = whole
+		}
+		to = slices.DeleteFunc(to, func(t string) bool { return t == id })
+		if len(to) > 0 {
+			sort.Strings(to)
+			b.addEdge(snapshot.EdgeContainedIn, BasisResourcePath, snapshot.Computed, id, to[0], b.invSource[id])
+			return
+		}
+	}
+	if n.Account == "" {
+		return
+	}
+	project := b.nodeID(snapshot.KindAccount, "gcp", n.Account, "", "", "projects/"+n.Account)
+	if _, ok := b.nodes[project]; !ok {
+		b.nodes[project] = snapshot.Node{
+			NodeID: project, Kind: snapshot.KindAccount, Cloud: "gcp", Account: n.Account,
+			NativeID: "projects/" + n.Account, ManagedStatus: snapshot.Unknown,
+			Confidence: snapshot.Computed, SourceID: b.invSource[id],
+		}
+	}
+	b.addEdge(snapshot.EdgeContainedIn, BasisProject, snapshot.Computed, id, project, b.invSource[id])
+}
+
+// maxPathSegments is the most "/"-separated segments of a resource ID that
+// are searched for a parent path. Real IDs have a dozen at most (an Azure
+// subnet has 11); an inventory file has no size limit, so an ID past this has
+// none, rather than being walked once per ancestor.
+const maxPathSegments = 64
+
+// gcpAncestors yields the paths a Google resource ID such as
+// projects/p/datasets/d/tables/t is inside, nearest first: projects/p/datasets/d,
+// then projects/p/datasets. It stops above the project's own collections. An
+// ID that is not a resource path (a bucket's name, or the short form some
+// resources import by) names none, and nor does one of more than
+// maxPathSegments segments. The paths are cut from the ID as it is, one at a
+// time, so a caller that stops at the first it knows pays for no more.
+func gcpAncestors(id string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		segs := strings.Count(id, "/") + 1
+		if segs < 4 || segs > maxPathSegments || !strings.HasPrefix(id, "projects/") ||
+			strings.Contains(id, "//") || strings.HasSuffix(id, "/") {
+			return
+		}
+		for n := segs - 1; n >= 3; n-- {
+			id = id[:strings.LastIndexByte(id, '/')]
+			if !yield(id) {
+				return
 			}
 		}
 	}
@@ -576,24 +646,42 @@ func sameScope(a, c snapshot.Node) bool {
 		(a.Region == "" || c.Region == "" || a.Region == c.Region)
 }
 
-// azureParents lists the resource IDs an Azure resource ID is inside, nearest
+// azureAncestors yields the resource IDs an Azure resource ID is inside, nearest
 // first: the resource its path continues from, and the resource group. The ID
-// is in lower case.
-func azureParents(id string) []string {
-	i := strings.Index(id, "/providers/")
-	if i < 0 {
-		return nil
+// is in lower case. A path of more than maxPathSegments segments after
+// /providers/ names no resource, only its group. The IDs are cut from the ID
+// as it is, one at a time, so a caller that stops at the first it knows pays
+// for no more.
+func azureAncestors(id string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		i := strings.Index(id, "/providers/")
+		if i < 0 {
+			return
+		}
+		const providers = len("/providers/")
+		tail := strings.Trim(id[i+providers:], "/")
+		// base holds the ID with the slashes around the path trimmed, the
+		// form the ancestors are cut from; that is the ID itself unless it
+		// has such slashes.
+		base := id
+		if len(tail) != len(id)-i-providers {
+			base = id[:i+providers] + tail
+		}
+		// The path is the namespace, then pairs of a type and a name.
+		segs := strings.Count(tail, "/") + 1
+		if segs <= maxPathSegments {
+			cur := tail
+			for n := segs - 2; n >= 3; n -= 2 {
+				cur = cur[:strings.LastIndexByte(cur[:strings.LastIndexByte(cur, '/')], '/')]
+				if !yield(base[:i+providers+len(cur)]) {
+					return
+				}
+			}
+		}
+		if strings.Contains(id[:i], "/resourcegroups/") {
+			yield(id[:i])
+		}
 	}
-	rest := strings.Split(strings.Trim(id[i+len("/providers/"):], "/"), "/")
-	var out []string
-	// rest is the namespace, then pairs of a type and a name.
-	for n := len(rest) - 2; n >= 3; n -= 2 {
-		out = append(out, id[:i]+"/providers/"+strings.Join(rest[:n], "/"))
-	}
-	if strings.Contains(id[:i], "/resourcegroups/") {
-		out = append(out, id[:i])
-	}
-	return out
 }
 
 // inventoryLimits says, in plain text, what the inventories leave open.

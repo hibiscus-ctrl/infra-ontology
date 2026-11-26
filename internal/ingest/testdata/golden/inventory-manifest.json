@@ -1,7 +1,7 @@
 {
   "format": "infra-ontology/snapshot/v1",
   "format_minor": 1,
-  "snapshot_id": "60b17b2c67bf17a9813464f4b1e165fe1e1545e8032d855cf0adfd08943fcd06",
+  "snapshot_id": "bf74285ad2d08a979586aff053ae0a0432c4e1885672c57f10bdfdcd3dbde48e",
   "parent_id": "",
   "label": "fixture",
   "created_at": "2026-11-25T12:00:00Z",
@@ -14,15 +14,15 @@
     {
       "name": "edges",
       "file": "edges.parquet",
-      "sha256": "258c039ccdd444de70a301427cb73016f54881808d9fa7d7329614500b349e6d",
-      "rows": 64,
+      "sha256": "5a705c56a535bff2f116c351bf9a90d30dbf9d9f1d24e3094883e72a9c2b410a",
+      "rows": 66,
       "schema": "infra-ontology/edge/v1"
     },
     {
       "name": "nodes",
       "file": "nodes.parquet",
-      "sha256": "20952ca624991c163a941a6f7f88fdf00a162b974dbe84a010b84b0860dfe32c",
-      "rows": 47,
+      "sha256": "6abe3b66710fc4d5e5ce02210f60ffd386f5c93c1cc39002a0cecbc5f6a30451",
+      "rows": 48,
       "schema": "infra-ontology/node/v1"
     },
     {

@@ -6,6 +6,8 @@ edge contained_in/module_containment/computed | resource module.network.aws_subn
 edge contained_in/module_containment/computed | resource module.network.aws_subnet.private[1] @ s3://acme-tfstate/prod/net.tfstate -> module_call module.network @ s3://acme-tfstate/prod/net.tfstate
 edge contained_in/module_containment/computed | resource module.network.aws_vpc.main @ s3://acme-tfstate/prod/net.tfstate -> module_call module.network @ s3://acme-tfstate/prod/net.tfstate
 edge contained_in/module_containment/computed | resource module.network.module.endpoints["s3"].aws_vpc_endpoint.this @ s3://acme-tfstate/prod/net.tfstate -> module_call module.network.module.endpoints["s3"] @ s3://acme-tfstate/prod/net.tfstate
+edge contained_in/project/computed | resource acme-prod-assets @  -> account projects/acme-prod
+edge contained_in/project/computed | resource google_compute_instance.vm @ gs://acme-gcs-state/dns/default.tfstate -> account projects/acme-prod
 edge contained_in/resource_path/computed | resource /subscriptions/aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb/resourcegroups/hub-rg/providers/microsoft.network/virtualnetworks/hub-vnet/subnets/snet-a @  -> resource azurerm_virtual_network.hub @ https://acmestate.blob.core.windows.net/tfstate/hub.tfstate
 edge contained_in/resource_path/computed | resource /subscriptions/aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb/resourcegroups/hub-rg/providers/microsoft.storage/storageaccounts/acmehubdiag @  -> resource azurerm_resource_group.hub @ https://acmestate.blob.core.windows.net/tfstate/hub.tfstate
 edge contained_in/resource_path/computed | resource azurerm_virtual_network.hub @ https://acmestate.blob.core.windows.net/tfstate/hub.tfstate -> resource azurerm_resource_group.hub @ https://acmestate.blob.core.windows.net/tfstate/hub.tfstate
@@ -62,6 +64,7 @@ edge reads_state_of/remote_state/observed | resource data.terraform_remote_state
 edge reads_state_of/remote_state/observed | resource data.terraform_remote_state.platform @ s3://acme-tfstate/prod/app.tfstate -> state_root tfc://acme/platform
 edge reads_state_of/remote_state/observed | resource data.terraform_remote_state.shared @ s3://acme-tfstate/prod/app.tfstate -> external s3://acme-other/shared.tfstate
 edge reads_state_of/remote_state/observed | resource data.terraform_remote_state.staging_net @ s3://acme-tfstate/prod/app.tfstate -> external s3://acme-tfstate/env:/staging/net.tfstate
+node account projects/acme-prod | cloud=gcp account=acme-prod region= type= native=projects/acme-prod path= name= module= managed=unknown confidence=computed
 node external s3://acme-other/shared.tfstate | cloud= account= region= type= native=s3://acme-other/shared.tfstate path= name=s3://acme-other/shared.tfstate module= managed=unknown confidence=inferred
 node external s3://acme-tfstate/env:/staging/net.tfstate | cloud= account= region= type= native=s3://acme-tfstate/env:/staging/net.tfstate path= name=s3://acme-tfstate/env:/staging/net.tfstate module= managed=unknown confidence=inferred
 node external unplaced:s3://acme-tfstate/prod/app.tfstate#data.terraform_remote_state.odd | cloud= account= region= type= native=unplaced:s3://acme-tfstate/prod/app.tfstate#data.terraform_remote_state.odd path= name=(unplaced) kubernetes backend of data.terraform_remote_state.odd module= managed=unknown confidence=inferred
