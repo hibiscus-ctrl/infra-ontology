@@ -106,6 +106,7 @@ func TestInstancesBecomeNodes(t *testing.T) {
 		TFType: "aws_vpc", NativeID: "vpc-0a1b", ARNOrPath: "arn:aws:ec2:eu-west-1:111111111111:vpc/vpc-0a1b",
 		Name: "main", Address: "module.network.aws_vpc.main", Module: "module.network", Root: netRoot,
 		ManagedStatus: snapshot.Managed, Confidence: snapshot.Observed,
+		Tags: map[string]string{"owner": "platform"},
 	}
 	vpc.NodeID, vpc.SourceID = "", ""
 	if fmt.Sprint(vpc) != fmt.Sprint(want) {

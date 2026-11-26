@@ -14,7 +14,7 @@ What infra-ontology protects, from what, and where it stops. The rules are the r
 
 ## What it never stores
 
-- **No attribute value and no output value.** State is read in memory, one resource at a time, and only the address, type, provider, module path, dependencies, `id` and `arn` of each instance, the names of its outputs and the places a `terraform_remote_state` reads from are kept. Everything else is dropped as the state is read ([state.md](state.md#what-a-snapshot-keeps)). Tags are not read from state at all.
+- **No attribute value and no output value.** State is read in memory, one resource at a time, and only the address, type, provider, module path, dependencies, `id`, `arn` and tags of each instance, the names of its outputs and the places a `terraform_remote_state` reads from are kept. Everything else is dropped as the state is read ([state.md](state.md#what-a-snapshot-keeps)). Tags (labels on Google Cloud) are read from state, and are the one value kept, after the secret detectors.
 - **No credential, ever.** Credentials come from the environment's default chains and are never taken from a flag's value, printed, stored or sent. A hash key (`--hash-ids`) is never written: not to the snapshot, not to the manifest, not to standard output or error.
 - **No secret-shaped identifier.** An `id` or ARN that has, or holds, the format of a credential, or is a URL with a user name, password or query parameter, is left out and counted in the manifest's `limits`; the ids of providers whose ids are free text or generated values (`random_*`, `http`, `external`, `local`, `null`, `time`, `archive`, `tls`) are not kept. Locations lose user names, passwords and unknown query parameters ([state.md](state.md#what-a-snapshot-keeps)).
 - **No query text or row in the audit log.** The MCP audit log holds hashes and counts ([mcp.md](mcp.md#the-audit-log)).
@@ -50,7 +50,7 @@ Releases are built by a workflow from a tag: the checksums file is signed with c
 
 ## Limits of the model
 
-- **Tags are the one value kept**, from inventories, after the detectors. A tag that is sensitive and does not look it gets through; `--drop-tags` removes them all.
+- **Tags are the one value kept**, from states and inventories, after the detectors. A tag that is sensitive and does not look it gets through; `--drop-tags` removes them all.
 - **A hashed snapshot still shows the shape of the estate**: types, accounts, regions, counts and times. Two snapshots hashed with one key can be compared; keep the key.
 - **A snapshot is as true as what it was read from.** `limits` says what is missing and the age of the oldest source; it cannot say what was never read.
 - **The files are checked, then opened.** A process that can write into the snapshot folder between `verify` and the engine loading the tables could change one. Serve or audit a snapshot from a folder only you can write to ([signing.md](signing.md#what-is-read-once)).

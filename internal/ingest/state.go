@@ -6,13 +6,17 @@
 // source, module call and state, and the edges between them. It keeps what
 // pkg/tfstate keeps, which is the address, the type and the ID or ARN of an
 // instance, and the places a state reads other states from, and writes
-// nothing else: no attribute value, no output value, no tag.
+// nothing else, and the tags, or labels on Google Cloud, that the state holds
+// for it, less the tags that look like secrets: no attribute value and no
+// output value.
 //
 // It also reads the documents infraharvest exports of a live estate
 // (inventory/v1 and ocsf-inventory/v1) and joins them to the states: a
 // resource in both is one managed node, one only in an inventory has the
 // status the inventory gives it. From an inventory it keeps the same
-// identifiers and the tags that do not look like secrets.
+// identifiers and the tags that do not look like secrets; where a resource is
+// in both, the inventory's tags are the node's, and a state's tags stand for
+// the resources no inventory has tags for.
 package ingest
 
 import (
@@ -392,6 +396,7 @@ func (b *builder) instanceNode(s *docState, in tfstate.Instance) snapshot.Node {
 		Kind:   snapshot.KindResource, Cloud: cloud, Account: sc.account, Region: sc.region,
 		TFType: tfType, NativeID: sc.id, ARNOrPath: sc.path, Name: in.Name,
 		Address: in.Address, Module: in.Module, Root: s.loc,
+		Tags:          b.filterTags(Resource{ID: id, Name: in.Name, Tags: in.Tags}, false),
 		ManagedStatus: managed, Confidence: snapshot.Observed, SourceID: s.source,
 	}
 }
@@ -586,13 +591,13 @@ func (b *builder) readFrom() []string {
 	switch {
 	case len(b.inventories) == 0:
 		return []string{"Read from Terraform state only: no live inventory was read, so nothing is marked unmanaged.",
-			"Attribute values, output values and tags are never read: the only values kept from a resource are its id and ARN."}
+			"Attribute values and output values are never read: the only values kept from a resource are its id, ARN and tags (labels on Google Cloud), less the tags that look like secrets."}
 	case !b.hadStates:
 		return []string{"Read from infraharvest inventories only: no Terraform state was read, so a resource has the status its inventory gives it and none is matched to a state.",
 			"Attribute values are never read: the only values kept from a resource are its id, ARN and tags, less the tags that look like secrets."}
 	}
 	return []string{"Read from Terraform state and infraharvest inventories: a resource in both is managed, and one only in an inventory has the status its inventory gives it (unmanaged, unless the inventory knows who manages it).",
-		"Attribute values and output values are never read: the only values kept from a resource are its id, ARN and, from an inventory, its tags, less the tags that look like secrets."}
+		"Attribute values and output values are never read: the only values kept from a resource are its id, ARN and its tags, less the tags that look like secrets. A resource in both has the tags of its inventory, or those of its state where the inventory has none."}
 }
 
 // digest is the SHA-256 of what is kept of a state: its serial, lineage and

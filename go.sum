@@ -44,8 +44,8 @@ github.com/AzureAD/microsoft-authentication-library-for-go v1.10.1 h1:0O6j18nQDo
 github.com/AzureAD/microsoft-authentication-library-for-go v1.10.1/go.mod h1:xdYAf5bjkOpsd3auA8riiJW4vneBubt9caavL7626jQ=
 github.com/DATA-DOG/go-sqlmock v1.5.2 h1:OcvFkGmslmlZibjAjaHm3L//6LiuBgolP7OputlJIzU=
 github.com/DATA-DOG/go-sqlmock v1.5.2/go.mod h1:88MAG/4G7SMwSE3CeA0ZKzrT5CiOU3OJ+JlNzwDqpNU=
-github.com/IgnatG/infraharvest v0.0.0-20261125142847-275a69f7cedb h1:tY+IfPA6jXmLTg834h/6i0FFeVKGApPl69TAPS2Y+/k=
-github.com/IgnatG/infraharvest v0.0.0-20261125142847-275a69f7cedb/go.mod h1:bamcU+iRS9COLT5ENW/qgvBHrgh3/iTJOReLc9ujWj0=
+github.com/IgnatG/infraharvest v0.0.0-20261126115047-45dde6406a9b h1:05nXDHF+ICTpCi58Urih+7uJYPBOEmo/rl7amYfNjSY=
+github.com/IgnatG/infraharvest v0.0.0-20261126115047-45dde6406a9b/go.mod h1:bamcU+iRS9COLT5ENW/qgvBHrgh3/iTJOReLc9ujWj0=
 github.com/ProtonMail/go-crypto v1.5.2 h1:cucYnvqcY7UOXVD//mSyjeaPY0SSN3v5cDkYPxumINk=
 github.com/ProtonMail/go-crypto v1.5.2/go.mod h1:/RaSu30DaKO4RY+XdV/ACcCcZkGr7AhUIduq5sjzzCo=
 github.com/agext/levenshtein v1.2.3 h1:YB2fHEn0UJagG8T1rrWknE3ZQzWM06O8AMAatNn7lmo=

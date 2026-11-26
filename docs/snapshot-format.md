@@ -69,4 +69,4 @@ The major version is in the format name and the schema names. Within a major, a 
 
 ## What is never in a snapshot
 
-No attribute value, no output value, no credential. Identifiers, addresses, dependencies and the places `terraform_remote_state` reads from are kept; tags are the one value kept, after the secret detectors. See [security.md](security.md).
+No attribute value, no output value, no credential. Identifiers, addresses, dependencies and the places `terraform_remote_state` reads from are kept; tags (labels on Google Cloud), from a state or an inventory, are the one value kept, after the secret detectors. See [security.md](security.md).

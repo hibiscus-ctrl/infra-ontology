@@ -27,7 +27,7 @@ infra-ontology does not import infraharvest's `internal/` packages and adds noth
 
 ## Joining to state
 
-A resource of an inventory is the same thing as a node a state produced when they have the same Terraform type (`aws_alb` is `aws_lb`) and the same ID, or the same ARN or resource path, and their accounts and regions do not contradict each other. Azure resource IDs are compared without regard to case; ARNs and Google paths keep theirs. The joined node is the state's, with the same `node_id`, its address and its source. The inventory adds what the state does not hold: the account and region where the state's ARN has none (an S3 bucket's), `inventory_type`, the name, and the tags.
+A resource of an inventory is the same thing as a node a state produced when they have the same Terraform type (`aws_alb` is `aws_lb`) and the same ID, or the same ARN or resource path, and their accounts and regions do not contradict each other. Azure resource IDs are compared without regard to case; ARNs and Google paths keep theirs. The joined node is the state's, with the same `node_id`, its address and its source. The inventory adds what the state does not hold: the account and region where the state's ARN has none (an S3 bucket's), `inventory_type` and the name. Tags: the inventory's win where it has any, and replace the state's whole; the state's tags stay where the inventory has none for the resource.
 
 | Where the resource is | `managed_status` | `confidence` |
 | --- | --- | --- |
@@ -60,7 +60,7 @@ Google resource paths and AWS ARNs name no parent, so they get `catalogue_child`
 
 ## What a snapshot keeps
 
-The same as for state: identifiers, and no attribute value. From an inventory it keeps the resource's type, ID, ARN or path, account, region, name, status and tags, and, from an OCSF inventory, the address, module address and root of an import.
+The same as for state: identifiers and tags, and no attribute value. From an inventory it keeps the resource's type, ID, ARN or path, account, region, name, status and tags, and, from an OCSF inventory, the address, module address and root of an import.
 
 - **IDs.** A resource whose ID, or ARN, has or holds the format of a credential, or is a URL with a user name, a password or a query parameter, is left out, and `limits` counts them. It cannot be told from another thing without its ID.
 - **Names, addresses and roots** that look like credentials are dropped; the node stays. A root is a location, so it goes through the same filter as a state's.

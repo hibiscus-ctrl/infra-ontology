@@ -392,7 +392,9 @@ func (b *builder) join(id string, r *invResource) {
 		n.ARNOrPath = r.sc.path
 		b.markIfHashed(id, r, "arn_or_path")
 	}
-	if len(n.Tags) == 0 {
+	// The inventory's tags win where it has any: they are what the cloud
+	// holds now. The state's stay for a resource the inventory has none for.
+	if len(r.Tags) > 0 {
 		n.Tags = r.Tags
 	}
 	b.nodes[id] = n

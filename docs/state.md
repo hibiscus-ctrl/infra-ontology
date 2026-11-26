@@ -32,10 +32,13 @@ State holds secrets, in attributes, in outputs and in the configuration of `terr
 
 - the address, type, provider, module path and dependencies of each instance;
 - its `id` and `arn` (and, for a resource with neither, its resource identity, which is used for the account and region only);
+- its tags, or its labels on Google Cloud: the `tags` and `tags_all` attributes (AWS and Azure; `tags_all` wins where the two differ, so a provider's default tags are in) and the `labels` attribute, string values only, after the secret detectors (see below);
 - the names of the outputs, never their values;
 - the place each `terraform_remote_state` reads from: its backend, bucket or container, key or prefix, organization and workspace, never a credential.
 
-Everything else is dropped while the state is read. Tags are not read at all, so a state snapshot has none.
+Everything else is dropped while the state is read.
+
+Tags go through the same filter as an inventory's ([inventory.md](inventory.md#what-a-snapshot-keeps)): a tag is dropped when its key names a secret, or its key or value has a credential's format or looks random enough to be one, and `--drop-tag KEY` and `--drop-tags` apply. The dropped keys are listed in `redaction.tag_keys_dropped` and `limits` counts the tags. Where a resource is in a state and in an inventory, the node has the inventory's tags if the inventory has any, whole and not mixed with the state's (the inventory is what the cloud holds now); the state's tags stay for a resource the inventory has none for, and for one no inventory lists.
 
 Two more rules keep a value out that is not an identifier. The `id` of a `random_*` resource is a generated value (`random_string`'s id is its result), so it is not kept, and nor are the ids of the `http`, `external`, `local`, `null`, `time`, `archive` and `tls` providers, which are free text (the URL `data.http` read, whatever an `external` program printed). And an `id` or ARN that has, or holds, the format of a credential, as found by infraharvest's `pkg/secretscan`, or that is a URL with a user name, a password or a query parameter, is not kept either: the instance is identified by its address instead, and the manifest's `limits` counts them. Locations also go through the secret detectors: a user name or password in a URL, a query parameter other than `region`, `profile`, `workspace_key_prefix` and `host`, and any part that has a credential's format are removed from the `location` of a source, a state root's name and an error's reason.
 
@@ -79,7 +82,7 @@ What is hashed, as the HMAC-SHA256 in hexadecimal that `infraharvest export --ha
 | `document_sha256` | `sources`: it hashes what was read, so it is keyed too |
 | `node_id`, `source_id` | the HMAC of the node's kind, cloud, account, region, type and hashed native ID, and an identifier made from the hashed location. `edge_id` is the SHA-256 of an edge's kind and its two (hashed) ends |
 
-Types, accounts, regions, kinds, statuses, counts and times stay readable, as in infraharvest. So do a state's serial, Terraform version and lineage, which is a random UUID. The tags an inventory brings go through infraharvest's tag filter with the key, so a `Name` tag, or a tag whose value is or holds an ID or a name, is hashed too, and a tag whose key names the resource is dropped. A `terraform_remote_state` read from a state that is not in the snapshot is an `external` node with a hashed name, and `limits` does not list its location. The reason a source could not be read is replaced by a fixed text, since an error message holds paths and names; the source's status and hashed location remain.
+Types, accounts, regions, kinds, statuses, counts and times stay readable, as in infraharvest. So do a state's serial, Terraform version and lineage, which is a random UUID. The tags of a state and of an inventory go through infraharvest's tag filter with the key, so a `Name` tag, or a tag whose value is or holds an ID or a name, is hashed too, and a tag whose key names the resource is dropped. A `terraform_remote_state` read from a state that is not in the snapshot is an `external` node with a hashed name, and `limits` does not list its location. The reason a source could not be read is replaced by a fixed text, since an error message holds paths and names; the source's status and hashed location remain.
 
 The same key gives the same hashes, so the same estate gives the same `snapshot_id`, `verify` and `diff` work as they do on any snapshot, and two snapshots hashed with one key can be compared. Two keys give two snapshots with no node in common. A hashed snapshot says so in the manifest (`redaction.hash_algorithm` is `hmac-sha256` and `redaction.ids_hashed` is true) and in `limits`.
 
