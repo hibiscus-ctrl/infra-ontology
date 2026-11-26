@@ -255,7 +255,7 @@ func TestInventoryAlone(t *testing.T) {
 	}
 	for _, n := range res.Tables.Nodes {
 		// The Google project is the one node that is not a resource.
-		if n.Kind != snapshot.KindResource && !(n.Kind == snapshot.KindAccount && n.Cloud == "gcp") {
+		if n.Kind != snapshot.KindResource && (n.Kind != snapshot.KindAccount || n.Cloud != "gcp") {
 			t.Errorf("node: %+v", n)
 		}
 	}
