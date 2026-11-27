@@ -16,7 +16,7 @@ import (
 
 var estate = filepath.Join("..", "..", "internal", "snapshot", "testdata", "golden", "estate")
 
-const estateID = "99e19bc9cf3ca3159e4c62b9703496e09f6f125ed5140d0f0aecbea4b3824f77"
+const estateID = "99688f074a1df1b1d4191ef98054e274628382e85aee41c72f8fa9257ed83401"
 
 func runCLI(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
@@ -138,7 +138,7 @@ func TestQueryJSONThenVerify(t *testing.T) {
 
 	// Without --snapshot the snapshot is looked up by its id in a folder of snapshots.
 	root := filepath.Join(dir, "snapshots")
-	if err := os.CopyFS(filepath.Join(root, "20261125T101500Z-99e19bc9cf3c"), os.DirFS(estate)); err != nil {
+	if err := os.CopyFS(filepath.Join(root, "20261125T101500Z-99688f074a1d"), os.DirFS(estate)); err != nil {
 		t.Fatal(err)
 	}
 	if code, _, errs := runCLI(t, "verify", "--answer", file, "--snapshots", root); code != 0 {

@@ -96,7 +96,7 @@ func TestTrustPolicyNeverReachesAnOutputFile(t *testing.T) {
 		if kinds["inferred trust_policy_wildcard"] != 2 || kinds["inferred trust_policy_condition"] < 4 {
 			t.Errorf("%s: can_assume edges: %v", name, kinds)
 		}
-		if l.Manifest.FormatMinor != 2 {
+		if l.Manifest.FormatMinor != 3 {
 			t.Errorf("%s: format_minor %d", name, l.Manifest.FormatMinor)
 		}
 	}

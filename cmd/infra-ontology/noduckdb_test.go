@@ -24,7 +24,7 @@ func TestQueryWithoutTheEngine(t *testing.T) {
 	if code != 1 || out.Len() != 0 {
 		t.Fatalf("exit %d, stdout %q", code, out.String())
 	}
-	for _, want := range []string{"query engine not built in (noduckdb build)", "CREATE TABLE nodes AS SELECT * FROM read_parquet(", "nodes.parquet", "WITH RECURSIVE targets", "'module.network'", "99e19bc9cf3c"} {
+	for _, want := range []string{"query engine not built in (noduckdb build)", "CREATE TABLE nodes AS SELECT * FROM read_parquet(", "nodes.parquet", "WITH RECURSIVE targets", "'module.network'", "99688f074a1d"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, got)
 		}
@@ -34,7 +34,7 @@ func TestQueryWithoutTheEngine(t *testing.T) {
 func TestVerifyAnswerWithoutTheEngine(t *testing.T) {
 	var out, errb bytes.Buffer
 	file := filepath.Join(t.TempDir(), "a.json")
-	answer := `{"snapshot_id": "99e19bc9cf3ca3159e4c62b9703496e09f6f125ed5140d0f0aecbea4b3824f77", "query": "SELECT 1"}`
+	answer := `{"snapshot_id": "99688f074a1df1b1d4191ef98054e274628382e85aee41c72f8fa9257ed83401", "query": "SELECT 1"}`
 	if err := os.WriteFile(file, []byte(answer), 0o644); err != nil {
 		t.Fatal(err)
 	}

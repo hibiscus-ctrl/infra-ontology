@@ -16,7 +16,7 @@ var (
 	nodeKinds = set(KindResource, KindModuleCall, KindStateRoot, KindAccount, KindExternal)
 	managed   = set(Managed, OtherIaC, Unmanaged, Unknown, Missing)
 	confs     = set(Observed, Computed, Inferred)
-	srcKinds  = set(SourceState, SourceInventory, SourcePlan)
+	srcKinds  = set(SourceState, SourceInventory, SourcePlan, SourceIAMLens)
 	statuses  = set(StatusOK, StatusPartial, StatusFailed)
 )
 

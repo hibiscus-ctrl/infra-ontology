@@ -13,8 +13,8 @@
       "minLength": 1
     },
     "kind": {
-      "description": "What kind of document the source is.",
-      "enum": ["state", "inventory", "plan"]
+      "description": "What kind of document the source is. iam_lens, a file of iam-lens who-can results, is added in format minor 3.",
+      "enum": ["state", "inventory", "plan", "iam_lens"]
     },
     "backend": {
       "description": "The backend or store the document was read from, for example s3, gcs, azblob, hcp or local.",

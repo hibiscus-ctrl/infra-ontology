@@ -177,6 +177,23 @@ func TestSchemasRefuseWhatTheyShould(t *testing.T) {
 	if err := validate(t, sch["edge"], edge); err == nil {
 		t.Error("the edge schema accepted an unknown member")
 	}
+	for _, kind := range []string{"can_read", "can_write"} {
+		edge := map[string]any{
+			"edge_id": strings.Repeat("a", 64), "from_id": strings.Repeat("b", 64), "to_id": strings.Repeat("c", 64),
+			"kind": kind, "confidence": "inferred", "basis": "iam_lens_condition", "source_id": "s",
+		}
+		if err := validate(t, sch["edge"], edge); err != nil {
+			t.Errorf("the edge schema refused %s: %v", kind, err)
+		}
+	}
+	source := map[string]any{"source_id": "iam-lens-a", "kind": "iam_lens", "status": "ok", "collected_at": "2026-11-25T10:15:00Z", "backend": "file"}
+	if err := validate(t, sch["source"], source); err != nil {
+		t.Errorf("the source schema refused an iam-lens file: %v", err)
+	}
+	source["kind"] = "a_kind_nobody_wrote"
+	if err := validate(t, sch["source"], source); err == nil {
+		t.Error("the source schema accepted an unknown kind")
+	}
 }
 
 var fixedTime = time.Date(2026, 11, 25, 10, 15, 0, 0, time.UTC)

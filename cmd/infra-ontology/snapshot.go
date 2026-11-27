@@ -272,9 +272,10 @@ func (f *listFlag) Set(v string) error { *f = append(*f, v); return nil }
 // or, as a test and development path, from a JSON file of rows (--from-json).
 func runBuild(args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("snapshot build", stderr)
-	var states, inventories, dropTags listFlag
+	var states, inventories, iamLens, dropTags listFlag
 	fs.Var(&states, "state", "a Terraform state to read: a path, s3://bucket/prefix, gs://bucket/prefix, azblob://account/container/prefix or hcp://organization/workspace (repeat for more)")
 	fs.Var(&inventories, "inventory", "an infraharvest export to read: an inventory/v1 or ocsf-inventory/v1 JSON file (repeat for more)")
+	fs.Var(&iamLens, "iam-lens", "a file of iam-lens who-can results, each wrapped as {\"resource\": ARN, \"result\": the output}, to add can_read and can_write edges from (repeat for more; needs --state or --inventory)")
 	fs.Var(&dropTags, "drop-tag", "a tag key to drop from the inventories' resources (repeat it, or separate keys with commas)")
 	dropAllTags := fs.Bool("drop-tags", false, "drop every tag of the inventories' resources")
 	hashIDs := fs.Bool("hash-ids", false, "hash IDs, ARNs, names, Terraform addresses and state locations with HMAC-SHA256, under a key from "+keyEnv+" (or "+secretscan.KeyEnv+") or --hash-key-file")
@@ -289,8 +290,8 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	switch {
-	case *from != "" && (len(states) > 0 || len(inventories) > 0):
-		fmt.Fprintln(stderr, "infra-ontology snapshot build: give --state and --inventory, or --from-json, not both")
+	case *from != "" && (len(states) > 0 || len(inventories) > 0 || len(iamLens) > 0):
+		fmt.Fprintln(stderr, "infra-ontology snapshot build: give --state, --inventory and --iam-lens, or --from-json, not both")
 		return exitUsage
 	case *from == "" && len(states) == 0 && len(inventories) == 0:
 		fmt.Fprintln(stderr, "infra-ontology snapshot build: --state LOCATION or --inventory FILE is required (or --from-json FILE, for tests)")
@@ -352,7 +353,7 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 			}
 			in.HashKey = key
 		}
-		if res, code = readSources(states, inventories, in, stderr); code != exitOK && code != exitPartial {
+		if res, code = readSources(states, inventories, iamLens, in, stderr); code != exitOK && code != exitPartial {
 			return code
 		}
 		tables, opts.Limits, opts.Redaction = res.Tables, res.Limits, res.Redaction
@@ -391,7 +392,7 @@ func readEstate(file string, est *estateFile, stderr io.Writer) int {
 // exitUsage for a location this build cannot read or a file that is not there,
 // exitFailed if nothing could be read and exitPartial if some could not: the
 // snapshot then says which.
-func readSources(locations, files []string, o ingest.Options, stderr io.Writer) (ingest.Result, int) {
+func readSources(locations, files, access []string, o ingest.Options, stderr io.Writer) (ingest.Result, int) {
 	resolved := make([]string, 0, len(locations))
 	for _, l := range locations {
 		r, err := ingest.Resolve(l)
@@ -410,6 +411,13 @@ func readSources(locations, files []string, o ingest.Options, stderr io.Writer) 
 			return ingest.Result{}, exitUsage
 		}
 	}
+	for _, f := range access {
+		if st, err := os.Stat(f); err != nil || !st.Mode().IsRegular() {
+			fmt.Fprintf(stderr, "infra-ontology snapshot build: --iam-lens %s is not a file\n", ingest.Sanitise(f))
+			return ingest.Result{}, exitUsage
+		}
+	}
+	o.Access = ingest.ReadAccessFiles(access)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	res, err := ingest.BuildAll(ingest.ReadAll(ctx, resolved, ingest.Stores()), ingest.ReadInventories(files), o)
@@ -419,8 +427,8 @@ func readSources(locations, files []string, o ingest.Options, stderr io.Writer) 
 	}
 	if res.Failed > 0 {
 		what, total := "states could not be read", len(resolved)
-		if len(files) > 0 {
-			what, total = "sources could not be read in full", len(resolved)+len(files)
+		if len(files) > 0 || len(access) > 0 {
+			what, total = "sources could not be read in full", len(resolved)+len(files)+len(access)
 		}
 		fmt.Fprintf(stderr, "infra-ontology snapshot build: %d of %d %s; the snapshot is partial and lists them\n", res.Failed, total, what)
 		return res, exitPartial

@@ -1,7 +1,7 @@
 {
   "format": "infra-ontology/snapshot/v1",
-  "format_minor": 2,
-  "snapshot_id": "381e1fe5f0762efe95873cb1f919fb037a6442af99cedab4c74bf1463804873b",
+  "format_minor": 3,
+  "snapshot_id": "c1d2c400544d9cb86cc3bb462672a9c20fa6e367e23fffba510fbe74e1f5b9d9",
   "parent_id": "",
   "label": "fixture",
   "created_at": "2026-11-25T12:00:00Z",
