@@ -89,6 +89,10 @@ type Options struct {
 	// the nodes and says so in the manifest, so a snapshot can be shared
 	// without them. It works with or without HashKey.
 	DropAddresses bool
+	// Access are the iam-lens files to read can_read and can_write edges from
+	// (see ReadAccessFiles). They add edges to what the states and inventories
+	// gave, and fail alone.
+	Access []AccessRead
 }
 
 // Result is the rows of the states, and what they cannot tell you.
@@ -156,10 +160,11 @@ func BuildAll(reads []Read, invs []InventoryRead, o Options) (Result, error) {
 		}
 	}
 	b.addTrust(states)
+	b.addAccess(o.Access)
 	tables := b.redactTables(b.tables())
 	return Result{
 		Tables: tables, Limits: b.limits(), Redaction: b.redaction(tables),
-		Failed: len(b.failed) + len(b.failedInventories) + b.partialInventories,
+		Failed: len(b.failed) + len(b.failedInventories) + b.partialInventories + b.access.failed,
 	}, nil
 }
 
@@ -234,6 +239,9 @@ type builder struct {
 
 	// trust is what the trust policies of roles held (see addTrust).
 	trust trustState
+
+	// access is what the iam-lens files held (see addAccess).
+	access accessState
 }
 
 func (b *builder) fail(r Read) {
@@ -606,6 +614,7 @@ func (b *builder) limits() string {
 	}
 	s = append(s, b.inventoryLimits()...)
 	s = append(s, b.trustLimits()...)
+	s = append(s, b.accessLimits()...)
 	return strings.Join(s, " ")
 }
 

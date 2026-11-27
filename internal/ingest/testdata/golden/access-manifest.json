@@ -1,0 +1,90 @@
+{
+  "format": "infra-ontology/snapshot/v1",
+  "format_minor": 3,
+  "snapshot_id": "19d6d4ad0023d7a4bc28cd31278094992a1b14a0a00e65cf6de25382f711e7ad",
+  "parent_id": "",
+  "label": "fixture",
+  "created_at": "2026-11-25T12:00:00Z",
+  "tool": {
+    "name": "infra-ontology",
+    "version": "test"
+  },
+  "status": "ok",
+  "tables": [
+    {
+      "name": "edges",
+      "file": "edges.parquet",
+      "sha256": "0e339d7eb5613233ed15852e208e8d854c90e6222961bab40975b3ec7c541a72",
+      "rows": 74,
+      "schema": "infra-ontology/edge/v1"
+    },
+    {
+      "name": "nodes",
+      "file": "nodes.parquet",
+      "sha256": "fc20975bd8cdc576df1da3dc04d3bc231b4b027b4438feaf214cd1aaa01a859f",
+      "rows": 45,
+      "schema": "infra-ontology/node/v1"
+    },
+    {
+      "name": "sources",
+      "file": "sources.parquet",
+      "sha256": "16d678356dc91e43e01eabffb544cf248ff44181b86b7677bc222a20e81f1e4b",
+      "rows": 7,
+      "schema": "infra-ontology/source/v1"
+    }
+  ],
+  "sources_summary": {
+    "count": 7,
+    "by_kind": {
+      "iam_lens": 1,
+      "state": 6
+    },
+    "oldest_collected_at": "2026-11-25T12:00:00Z",
+    "newest_collected_at": "2026-11-25T12:00:00Z"
+  },
+  "redaction": {
+    "hash_algorithm": "none",
+    "ids_hashed": false,
+    "addresses_dropped": false,
+    "tag_keys_dropped": [],
+    "all_tags_dropped": false
+  },
+  "coverage": {
+    "clouds": [
+      "aws",
+      "azure",
+      "gcp"
+    ],
+    "accounts": [
+      "111111111111",
+      "222222222222",
+      "999999999999",
+      "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb",
+      "acme-prod"
+    ],
+    "types": [
+      "aws_caller_identity",
+      "aws_db_instance",
+      "aws_ecs_cluster",
+      "aws_iam_role",
+      "aws_iam_user",
+      "aws_instance",
+      "aws_lb",
+      "aws_s3_bucket",
+      "aws_subnet",
+      "aws_vpc",
+      "aws_vpc_endpoint",
+      "azurerm_resource_group",
+      "azurerm_virtual_network",
+      "google_compute_instance",
+      "google_compute_subnetwork",
+      "google_dns_managed_zone",
+      "random_password",
+      "random_string",
+      "terraform_data",
+      "terraform_remote_state"
+    ],
+    "failed_sources": []
+  },
+  "limits": "Read from Terraform state only: no live inventory was read, so nothing is marked unmanaged. Attribute values and output values are never read: the only values kept from a resource are its id, ARN and tags (labels on Google Cloud), less the tags that look like secrets. 2 states read by terraform_remote_state are not in this snapshot, so anything that depends on them stops at an external placeholder: s3://acme-other/shared.tfstate, s3://acme-tfstate/env:/staging/net.tfstate. 1 terraform_remote_state data sources use a backend whose settings name no state this reader can place, so they point to a placeholder. 1 dependencies name an address the state does not hold and are left out. can_assume edges come only from the trust policies of the aws_iam_role resources a state holds: a role made outside Terraform has none, and identity policies, permission boundaries, service control policies and session policies are not read, so an edge says a trust policy allows it, not that the principal can. An account, a wildcard, a condition, a Deny statement or another account makes an edge inferred, and no condition or Deny is evaluated. can_read and can_write edges come only from iam-lens results read from a file: infra-ontology does not run iam-lens, read policies or call the cloud, so an edge says iam-lens judged the principal allowed on the IAM data it was given, which this snapshot does not hold and which may be older than the rest of it. can_read and can_write mean only that iam-lens classes an action the principal is allowed as Read or List (can_read), or as Write, Tagging or Permissions management (can_write): they do not say the principal can read or write the data in the resource, since those levels include metadata reads such as s3:GetBucketLocation and actions such as lambda:InvokeFunction, kms:Decrypt, sns:Publish, sqs:SendMessage and iam:PassRole. Another level of action and any sts action make no edge. A result with a condition makes an inferred edge, and the condition is not kept; public access (anonymous or *), a principal of another account or of an account not known, and an account principal make inferred edges too. Only the resources the snapshot holds have edges. 1 iam-lens results are for a resource this snapshot does not hold, and have no edge. 1 iam-lens results are for a resource that is not a concrete ARN (a wildcard, or too long), and have no edge. 1 iam-lens results say they did not check every account (allAccountsChecked is false: a run limited by a principal scope or to some accounts), so who can reach the resource is not all they list. 1 iam-lens results say they found no collected data for an account, organization or principal the resource's policy names, so who can reach the resource is not all they list. 2 iam-lens entries are for an action of a level that makes no edge, or an sts action. 1 principals of iam-lens results (sessions, ARNs of other services, strings that are not a principal) are not turned into edges."
+}

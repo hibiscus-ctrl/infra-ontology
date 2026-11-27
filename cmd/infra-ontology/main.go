@@ -56,6 +56,8 @@ commands:
                                       hcp://organization/workspace; --inventory adds what is live,
                                       from an infraharvest inventory/v1 or ocsf-inventory/v1 export
                                       (--drop-tag KEY, --drop-tags: tags to leave out)
+                                      (--iam-lens FILE: iam-lens who-can results, wrapped with their resource, add
+                                      can_read and can_write edges)
                                       (--hash-ids [--hash-key-file FILE]: hash IDs, names, addresses and
                                       locations with HMAC-SHA256; the key is INFRA_ONTOLOGY_KEY or the file)
                                       (--drop-addresses: leave Terraform addresses, module paths and names out of the nodes)

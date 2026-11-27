@@ -14,6 +14,11 @@ Only `snapshot build` reads a backend. `query`, `diff`, `verify`, `export` and `
 | `azblob://` | list and read blobs | Azure's default chain, or the `ARM_*` variables |
 | `hcp://` | read workspaces and state versions | `TF_TOKEN_*` or the Terraform CLI configuration |
 | `--inventory FILE` | read access to the file | the file system |
+| `--iam-lens FILE` | read access to the file | the file system |
+
+## iam-lens results
+
+`--iam-lens` reads a file of `iam-lens who-can` results (see [access.md](access.md)); infra-ontology itself calls no cloud API for it and never runs iam-lens. The IAM data iam-lens evaluates is downloaded by iam-collect, with its own read-only access, which is described in its documentation.
 
 ## Local files
 

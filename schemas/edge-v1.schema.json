@@ -23,7 +23,7 @@
       "pattern": "^[0-9a-f]{64}$"
     },
     "kind": {
-      "description": "The edge kind. v0 writes depends_on, contained_in, defined_in and reads_state_of, and format minor 2 adds can_assume (a principal to a role its trust policy names); later minor versions may add kinds, so readers accept an unknown one.",
+      "description": "The edge kind. v0 writes depends_on, contained_in, defined_in and reads_state_of, format minor 2 adds can_assume (a principal to a role its trust policy names), and format minor 3 adds can_read and can_write (a principal to a resource an iam-lens result says it can read or write); later minor versions may add kinds, so readers accept an unknown one.",
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]*$"
     },
@@ -32,7 +32,7 @@
       "enum": ["observed", "computed", "inferred"]
     },
     "basis": {
-      "description": "A short code for why the edge exists, for example state_dependency, module_containment, remote_state, catalogue_child or resource_path, and for can_assume trust_policy, trust_policy_cross_account, trust_policy_account, trust_policy_condition, trust_policy_deny or trust_policy_wildcard. Open to additions in a minor version.",
+      "description": "A short code for why the edge exists, for example state_dependency, module_containment, remote_state, catalogue_child or resource_path, and for can_assume trust_policy, trust_policy_cross_account, trust_policy_account, trust_policy_condition, trust_policy_deny or trust_policy_wildcard, and for can_read and can_write iam_lens, iam_lens_condition, iam_lens_public, iam_lens_public_condition, iam_lens_cross_account, iam_lens_unknown_account or iam_lens_account. Open to additions in a minor version.",
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]*$"
     },

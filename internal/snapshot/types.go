@@ -14,7 +14,7 @@ const Format = "infra-ontology/snapshot/v1"
 
 // FormatMinor is the minor version this package writes. Within a major,
 // changes only add columns, kinds and members.
-const FormatMinor = 2
+const FormatMinor = 3
 
 // File names inside a snapshot folder.
 const (
@@ -65,6 +65,10 @@ const (
 	// EdgeCanAssume runs from a principal to a role its trust policy names
 	// (format minor 2).
 	EdgeCanAssume = "can_assume"
+	// EdgeCanRead and EdgeCanWrite run from a principal to a resource iam-lens
+	// judged it allowed to read (or list) or to write (format minor 3).
+	EdgeCanRead  = "can_read"
+	EdgeCanWrite = "can_write"
 )
 
 // Source kinds and statuses.
@@ -72,6 +76,8 @@ const (
 	SourceState     = "state"
 	SourceInventory = "inventory"
 	SourcePlan      = "plan"
+	// SourceIAMLens is a file of iam-lens results (format minor 3).
+	SourceIAMLens = "iam_lens"
 
 	StatusOK      = "ok"
 	StatusPartial = "partial"
