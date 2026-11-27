@@ -75,16 +75,17 @@ func TestAccessEdgesFromIAMLensResults(t *testing.T) {
 	// The edges, one by one: the labels of placeholders are their types.
 	has := func(line string) bool { return slices.Contains(got, line) }
 	for _, line := range []string{
-		`can_read/iam_lens/computed aws_iam_role.app -> aws_s3_bucket.logs["app"]`,
-		`can_read/iam_lens/computed aws_iam_role.app -> aws_s3_bucket.logs["audit"]`,
+		// An S3 bucket's ARN names no account, so a principal may be of another.
+		`can_read/iam_lens_unknown_account/inferred aws_iam_role.app -> aws_s3_bucket.logs["app"]`,
+		`can_read/iam_lens_unknown_account/inferred aws_iam_role.app -> aws_s3_bucket.logs["audit"]`,
 		`can_read/iam_lens/computed aws_iam_role.app -> aws_db_instance.main`,
-		`can_read/iam_lens/computed aws_iam_role.ci -> aws_s3_bucket.logs["audit"]`,
-		`can_write/iam_lens/computed aws_iam_role.ci -> aws_s3_bucket.logs["app"]`,
-		`can_write/iam_lens/computed aws_iam_user.deploy -> aws_s3_bucket.logs["app"]`,
+		`can_read/iam_lens_unknown_account/inferred aws_iam_role.ci -> aws_s3_bucket.logs["audit"]`,
+		`can_write/iam_lens_unknown_account/inferred aws_iam_role.ci -> aws_s3_bucket.logs["app"]`,
+		`can_write/iam_lens_unknown_account/inferred aws_iam_user.deploy -> aws_s3_bucket.logs["app"]`,
 		`can_read/iam_lens_condition/inferred aws_iam_role.ci -> aws_s3_bucket.logs["app"]`,
 		`can_read/iam_lens_public/inferred any_principal:* -> aws_s3_bucket.logs["app"]`,
 		`can_write/iam_lens_condition/inferred service_principal:delivery.logs.amazonaws.com -> aws_s3_bucket.logs["app"]`,
-		`can_read/iam_lens/computed aws_iam_role:arn:aws:iam::999999999999:role/partner -> aws_s3_bucket.logs["app"]`,
+		`can_read/iam_lens_unknown_account/inferred aws_iam_role:arn:aws:iam::999999999999:role/partner -> aws_s3_bucket.logs["app"]`,
 	} {
 		if !has(line) {
 			t.Errorf("missing edge %s\nhave:\n%s", line, strings.Join(got, "\n"))
@@ -104,6 +105,8 @@ func TestAccessEdgesFromIAMLensResults(t *testing.T) {
 		"2 iam-lens entries are for an action of a level that makes no edge, or an sts action",
 		"1 principals of iam-lens results",
 		"1 iam-lens results say they found no collected data",
+		"1 iam-lens results say they did not check every account",
+		"mean only that iam-lens classes an action",
 		"does not run iam-lens",
 	} {
 		if !strings.Contains(res.Limits, want) {
@@ -120,7 +123,7 @@ func TestAccessEdgesEndAtTheSnapshotsNodes(t *testing.T) {
 	tb := res.Tables
 	app := nodeAt(t, tb, accessIAMRoot, "aws_iam_role.app").NodeID
 	bucket := nodeAt(t, tb, netRoot, `aws_s3_bucket.logs["app"]`).NodeID
-	if !hasEdge(tb, snapshot.EdgeCanRead, BasisIAMLens, app, bucket) {
+	if !hasEdge(tb, snapshot.EdgeCanRead, BasisIAMLensUnknownAccount, app, bucket) {
 		t.Errorf("no can_read from the role to the bucket")
 	}
 	// The role that the trust policy of another role names is the same node the
@@ -162,10 +165,10 @@ func TestAccessKeepsTheStrongestEdgeWhateverTheOrder(t *testing.T) {
 		return p
 	}
 	entry := func(extra string) string {
-		return `{"principal":"arn:aws:iam::111111111111:role/ci","service":"s3","action":"GetObject","level":"read"` + extra + `}`
+		return `{"principal":"arn:aws:iam::111111111111:role/ci","service":"rds","action":"DescribeDBInstances","level":"list"` + extra + `}`
 	}
 	doc := func(entries ...string) string {
-		return `{"resource":"arn:aws:s3:::acme-logs-app","result":{"allowed":[` + strings.Join(entries, ",") + `]}}`
+		return `{"resource":"arn:aws:rds:eu-west-1:111111111111:db:main","result":{"allowed":[` + strings.Join(entries, ",") + `]}}`
 	}
 	a := write("a.json", doc(entry(`,"conditions":{"conditionType":"condition"}`)))
 	b := write("b.json", doc(entry(""), entry(`,"ignoredConditions":{"x":1}`)))
@@ -596,4 +599,215 @@ func FuzzParseAccess(f *testing.F) {
 			t.Errorf("%d results, %d entries, digest %q", len(doc.Results), entries, doc.Digest)
 		}
 	})
+}
+
+// accessDoc is a file of one result for the fixture's database (accessDB), with the
+// entries given: principal, level and extra members of each.
+func accessDoc(t *testing.T, entries ...[3]string) string {
+	t.Helper()
+	var es []string
+	for _, e := range entries {
+		es = append(es, fmt.Sprintf(`{"principal":%q,"service":"rds","action":"DescribeDBInstances","level":%q%s}`, e[0], e[1], e[2]))
+	}
+	p := filepath.Join(t.TempDir(), "doc.json")
+	body := fmt.Sprintf(`{"resource":%q,"result":{"allowed":[%s]}}`, accessDB, strings.Join(es, ","))
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+const accessDB = "arn:aws:rds:eu-west-1:111111111111:db:main"
+
+func TestAccessBasisFollowsThePrincipal(t *testing.T) {
+	cond := `,"conditions":{"conditionType":"condition"}`
+	file := accessDoc(t,
+		[3]string{"arn:aws:iam::111111111111:role/app", "read", ""},       // same account
+		[3]string{"arn:aws:iam::999999999999:role/partner", "read", ""},   // another account
+		[3]string{"arn:aws:iam::111111111111:root", "read", ""},           // an account
+		[3]string{"arn:aws:iam::111111111111:user/deploy", "write", cond}, // conditional, same account
+		[3]string{"anonymous", "write", cond},                             // public with a condition
+		[3]string{"*", "read", ""}, [3]string{"anonymous", "read", cond},  // one edge: the unconditional
+	)
+	got := accessEdges(buildAccess(t, accessReads(t), opts, file).Tables)
+	want := []string{
+		`can_read/iam_lens/computed aws_iam_role.app -> aws_db_instance.main`,
+		`can_read/iam_lens_cross_account/inferred aws_iam_role:arn:aws:iam::999999999999:role/partner -> aws_db_instance.main`,
+		`can_read/iam_lens_account/inferred :arn:aws:iam::111111111111:root -> aws_db_instance.main`,
+		`can_write/iam_lens_condition/inferred aws_iam_user.deploy -> aws_db_instance.main`,
+		`can_write/iam_lens_public_condition/inferred any_principal:* -> aws_db_instance.main`,
+		`can_read/iam_lens_public/inferred any_principal:* -> aws_db_instance.main`,
+	}
+	// The account node is labelled by what it is, whatever its label is.
+	n := 0
+	for _, line := range got {
+		if strings.HasPrefix(line, "can_read/iam_lens_account/inferred ") {
+			n++
+			continue
+		}
+		if !slices.Contains(want, line) {
+			t.Errorf("unexpected edge %s", line)
+		}
+	}
+	if n != 1 {
+		t.Errorf("%d account edges:\n%s", n, strings.Join(got, "\n"))
+	}
+	for _, line := range want {
+		if !strings.HasPrefix(line, "can_read/iam_lens_account") && !slices.Contains(got, line) {
+			t.Errorf("missing edge %s\nhave:\n%s", line, strings.Join(got, "\n"))
+		}
+	}
+	// "*" and anonymous are one principal, so the unconditional read of "*"
+	// and the conditional read of anonymous are one edge, the unconditional
+	// kept, and the conditional write of anonymous keeps its own basis.
+	if len(got) != len(want) {
+		t.Errorf("%d edges, want %d:\n%s", len(got), len(want), strings.Join(got, "\n"))
+	}
+}
+
+func TestAccessStarIsPublicLikeAnonymous(t *testing.T) {
+	// "*" alone must not outrank anonymous as computed: it is inferred, with
+	// the same basis.
+	for _, p := range []string{"*", "anonymous"} {
+		got := accessEdges(buildAccess(t, accessReads(t), opts, accessDoc(t, [3]string{p, "read", ""})).Tables)
+		if len(got) != 1 || got[0] != `can_read/iam_lens_public/inferred any_principal:* -> aws_db_instance.main` {
+			t.Errorf("%s: %v", p, got)
+		}
+	}
+}
+
+func TestParseAccessDigestIgnoresTheOrder(t *testing.T) {
+	r := func(resource string, level string, extra string) string {
+		return fmt.Sprintf(`{"resource":%q,"result":{"allowed":[{"principal":"p","service":"s3","action":"a","level":%q}]%s}}`, resource, level, extra)
+	}
+	// The same resource twice with different content, and another resource.
+	a, b, c := r("arn:aws:s3:::x", "read", ""), r("arn:aws:s3:::x", "write", ""), r("arn:aws:s3:::y", "read", `,"allAccountsChecked":false`)
+	var digests []string
+	for _, order := range [][]string{{a, b, c}, {c, b, a}, {b, a, c}, {b, c, a}} {
+		doc, err := ParseAccess([]byte(strings.Join(order, "\n")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		digests = append(digests, doc.Digest)
+		arr, err := ParseAccess([]byte("[" + strings.Join(order, ",") + "]"))
+		if err != nil || arr.Digest != doc.Digest {
+			t.Errorf("an array of the same results: %v", err)
+		}
+	}
+	for _, d := range digests {
+		if d != digests[0] {
+			t.Errorf("the digest depends on the order: %v", digests)
+		}
+	}
+	// And it does depend on what is held, including a scoped run.
+	other, err := ParseAccess([]byte(strings.Join([]string{a, b, r("arn:aws:s3:::y", "read", "")}, "\n")))
+	if err != nil || other.Digest == digests[0] {
+		t.Errorf("a scoped result and a complete one have one digest: %v", err)
+	}
+}
+
+func TestAccessCountsDuplicateLocationsAndScopedRuns(t *testing.T) {
+	file := accessDoc(t, [3]string{"arn:aws:iam::111111111111:role/app", "read", ""})
+	res := buildAccess(t, accessReads(t), opts, file, file, filepath.Join(filepath.Dir(file), ".", filepath.Base(file)))
+	if got := len(accessEdges(res.Tables)); got != 1 {
+		t.Errorf("%d edges", got)
+	}
+	if !strings.Contains(res.Limits, "2 iam-lens locations were given more than once and were read once") {
+		t.Errorf("limits: %s", res.Limits)
+	}
+	if res.Failed != 0 {
+		t.Errorf("failed %d", res.Failed)
+	}
+	sources := 0
+	for _, s := range res.Tables.Sources {
+		if s.Kind == snapshot.SourceIAMLens {
+			sources++
+		}
+	}
+	if sources != 1 {
+		t.Errorf("%d sources for one file", sources)
+	}
+	// The fixture's first result is of a run that did not check every account.
+	res = buildAccess(t, accessReads(t), opts, accessFile(t))
+	if !strings.Contains(res.Limits, "1 iam-lens results say they did not check every account (allAccountsChecked is false") {
+		t.Errorf("limits: %s", res.Limits)
+	}
+}
+
+func TestAccessOfAHashedInventoryIsReportedNotCountedAsAbsent(t *testing.T) {
+	h := func(s string) string { return secretscan.Hash(testKey, s) }
+	inv := Inventory{
+		Location: "hashed.inventory.json", Schema: SchemaInventory, Tool: "infraharvest", IDsHashed: true,
+		Resources: []Resource{{Cloud: "aws", Account: "111111111111", Region: "eu-west-1", Type: "aws_db_instance", ID: h("main"), CloudID: h(accessDB), Status: "unmanaged", Basis: "none"}},
+	}
+	inv.Digest = digestOf(inv)
+	o := opts
+	o.HashKey = testKey
+	o.Access = ReadAccessFiles([]string{accessDoc(t, [3]string{"arn:aws:iam::111111111111:role/app", "read", ""})})
+	res, err := BuildAll(nil, []InventoryRead{{Location: inv.Location, Inv: inv}}, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(accessEdges(res.Tables)); got != 0 {
+		t.Errorf("%d edges", got)
+	}
+	for _, want := range []string{
+		"1 AWS resources of an inventory written with --hash-ids have an ARN that is a hash",
+		"1 iam-lens results are for a resource this snapshot does not hold",
+	} {
+		if !strings.Contains(res.Limits, want) {
+			t.Errorf("limits lack %q:\n%s", want, res.Limits)
+		}
+	}
+}
+
+func TestAccessTotalCapsAcrossFiles(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string, entries int) string {
+		var es []string
+		for i := 0; i < entries; i++ {
+			es = append(es, `{"principal":"p","service":"s3","action":"a","level":"read"}`)
+		}
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(`{"resource":"arn:aws:s3:::b","result":{"allowed":[`+strings.Join(es, ",")+`]}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	a, b, c := write("a.json", 6), write("b.json", 6), write("c.json", 2)
+	// 10 entries in all: a (6) is read, b (6) is past the cap, c (2) is read.
+	// The order of the arguments does not change which.
+	for _, files := range [][]string{{a, b, c}, {c, b, a}, {b, c, a}} {
+		reads := readAccessFiles(files, 1<<20, 10)
+		var failed []string
+		for _, r := range reads {
+			if r.Err != nil {
+				failed = append(failed, filepath.Base(r.Location))
+				if !strings.Contains(r.Err.Error(), "total of 10 entries") {
+					t.Errorf("reason %q", r.Err)
+				}
+			}
+		}
+		if !slices.Equal(failed, []string{"b.json"}) {
+			t.Errorf("%v: failed %v", files, failed)
+		}
+	}
+	// Bytes: the files in the order of their locations take the budget.
+	info, err := os.Stat(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	budget := int(info.Size()) + 10
+	for _, files := range [][]string{{a, b, c}, {c, b, a}} {
+		reads := readAccessFiles(files, budget, 1000)
+		for _, r := range reads {
+			base := filepath.Base(r.Location)
+			if (base == "a.json") != (r.Err == nil) {
+				t.Errorf("%v: %s: %v", files, base, r.Err)
+			}
+			if r.Err != nil && !strings.Contains(r.Err.Error(), "total of 128 MiB") {
+				t.Errorf("reason %q", r.Err)
+			}
+		}
+	}
 }

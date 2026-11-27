@@ -106,9 +106,9 @@ func TestIAMLensResultsNeverReachAnOutputFile(t *testing.T) {
 		// app reads, app writes under a condition, the vendor's role reads,
 		// anyone reads.
 		want := map[string]int{
-			"can_read computed iam_lens":            2,
-			"can_write inferred iam_lens_condition": 1,
-			"can_read inferred iam_lens_public":     1,
+			"can_read inferred iam_lens_unknown_account": 2,
+			"can_write inferred iam_lens_condition":      1,
+			"can_read inferred iam_lens_public":          1,
 		}
 		for k, n := range want {
 			if kinds[k] != n {

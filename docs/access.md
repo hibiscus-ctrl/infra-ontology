@@ -2,6 +2,8 @@
 
 `infra-ontology snapshot build --iam-lens FILE` adds `can_read` and `can_write` edges from the results of [iam-lens](https://github.com/act-security-labs/iam-lens), a separate tool that evaluates the IAM policies of an AWS estate that [iam-collect](https://github.com/act-security-labs/iam-collect) downloaded. infra-ontology never runs iam-lens, never reads the IAM data and calls no cloud API for this: it reads a file you made, and nothing else. iam-lens is AGPL-3.0 and a separate program; nothing of it is bundled or linked here.
 
+**What `can_read` and `can_write` mean.** They mean only that iam-lens classes an action the principal is allowed as Read or List (`can_read`), or as Write, Tagging or Permissions management (`can_write`). They do not mean the principal can read or write the data in the resource: iam-lens's Read level includes metadata such as `s3:GetBucketLocation`, and its Write level includes `lambda:InvokeFunction`, `kms:Decrypt`, `sns:Publish`, `sqs:SendMessage` and `iam:PassRole`. The mapping is by access level alone, and the manifest's `limits` says so.
+
 An edge reads from can read, or can write, to: `from` is a principal and `to` is a resource of the snapshot, so "who can reach this bucket" is a walk along the edges into it, as "who can assume this role" is for [`can_assume`](state.md#who-can-assume-a-role).
 
 ## Making the file
@@ -35,16 +37,17 @@ Each entry of a result's `allowed` list is a principal, a service, an action and
 
 | The principal | The edge starts at | Confidence and basis |
 | --- | --- | --- |
-| a role or user the snapshot holds, found by its ARN | that node | `computed`, `iam_lens` |
-| a role or user it does not hold | an `external` placeholder built from the ARN, as for a trust policy | `computed`, `iam_lens` |
+| a role or user of the resource's account, the snapshot holds or not | that node, or an `external` placeholder built from the ARN, as for a trust policy | `computed`, `iam_lens` |
+| a role or user of another account | the same | `inferred`, `iam_lens_cross_account` |
+| a role or user, where the resource's account is not known (an S3 bucket's ARN names none, and its node may not either) | the same | `inferred`, `iam_lens_unknown_account` |
 | a service (`delivery.logs.amazonaws.com`) | an `external` placeholder of type `service_principal` | `computed`, `iam_lens` |
-| `anonymous` (unsigned access) | the `external` placeholder of type `any_principal` that `can_assume` uses | `inferred`, `iam_lens_public` |
-| an account (`arn:aws:iam::123456789012:root`) | an `account` node | `computed`, `iam_lens` |
+| `anonymous` (unsigned access) or `*`: anyone | the `external` placeholder of type `any_principal` that `can_assume` uses | `inferred`, `iam_lens_public` |
+| an account (`arn:aws:iam::123456789012:root`) | an `account` node | `inferred`, `iam_lens_account` |
 | a session, an ARN of another service, a string that is not a principal | none, counted in `limits` | |
 
-An entry that has `conditions`, `ignoredConditions` or depends on the role session's name makes an `inferred` edge (`iam_lens_condition`): the condition is not evaluated here and is not kept, only that there was one. Where several entries, or several files, give the same edge, the strongest confidence wins, and among equals the lowest basis, so the order of the files and entries changes nothing.
+The confidences are those of `can_assume` for the same principals: the account of the principal is compared with the resource's, as a trust policy's is with the role's. An entry that has `conditions`, `ignoredConditions` or depends on the role session's name makes an `inferred` edge (`iam_lens_condition`, or `iam_lens_public_condition` for anyone, which stays apart from public access that has none): the condition is not evaluated here and is not kept, only that there was one. Where several entries, or several files, give the same edge, an entry without a condition wins over one with, and among equals the lowest source, so the order of the files and entries changes nothing. `*` and `anonymous` are one principal.
 
-The resource must be an ARN of an AWS resource the snapshot holds, concrete (no `*` or `?`), and found by its ARN. A result for a resource the snapshot does not hold, or for a wildcard ARN, makes no edge and no node, and `limits` counts it. A result that says iam-lens found no collected data for an account, organization or principal the resource's policy names (`accountsNotFound` and the like) is counted too: who can reach the resource is then not all it lists.
+The resource must be an ARN of an AWS resource the snapshot holds, concrete (no `*` or `?`), and found by its ARN. A result for a resource the snapshot does not hold, or for a wildcard ARN, makes no edge and no node, and `limits` counts it. A result that says iam-lens found no collected data for an account, organization or principal the resource's policy names (`accountsNotFound` and the like) is counted too: who can reach the resource is then not all it lists. So is a result whose `allAccountsChecked` is false, which is a run that did not check every account (limited by a principal scope or to some accounts). A location given twice with `--iam-lens` is read once and counted. If an inventory was written with `--hash-ids`, the ARNs of its AWS resources are hashes, which no result's resource can be matched to: `limits` says how many such resources there are, and that results counted as for a resource the snapshot does not hold may be for them.
 
 ## What it does not say
 
@@ -52,7 +55,7 @@ An edge says iam-lens judged the principal allowed on the IAM data it was given,
 
 ## Caps
 
-A file is read only up to 32 MiB, 10,000 results and 200,000 entries; a file past one is a failed source, and the rest of the snapshot is built. A snapshot takes at most 100,000 `can_read` and `can_write` edges and 10,000 distinct principals from all its files; what is past the caps is counted in `limits` and left out, in the order of the principals' ARNs, so the same files give the same snapshot.
+A file is read only up to 32 MiB, 10,000 results and 200,000 entries; a file past one is a failed source, and the rest of the snapshot is built. All the files together may hold 128 MiB and 500,000 entries: the files are read in the order of their locations, and one past the total is a failed source too, so the same files fail whatever the order they were given in. A snapshot takes at most 100,000 `can_read` and `can_write` edges and 10,000 distinct principals from all its files; what is past the caps is counted in `limits` and left out, in the order of the principals' ARNs, so the same files give the same snapshot.
 
 ## What is never in a snapshot
 

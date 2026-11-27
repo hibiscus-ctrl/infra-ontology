@@ -28,8 +28,23 @@ const (
 	// BasisIAMLensCondition: the result carries a condition (or a note that a
 	// condition was ignored), which is not evaluated here and not kept.
 	BasisIAMLensCondition = "iam_lens_condition"
-	// BasisIAMLensPublic: the principal is anonymous: unsigned access.
+	// BasisIAMLensPublic: the principal is anonymous (unsigned access) or "*":
+	// anyone. Inferred, as a wildcard principal of a trust policy is.
 	BasisIAMLensPublic = "iam_lens_public"
+	// BasisIAMLensPublicCondition: public access, and the result carries a
+	// condition, which is not evaluated here and not kept: kept apart from
+	// access that has none.
+	BasisIAMLensPublicCondition = "iam_lens_public_condition"
+	// BasisIAMLensCrossAccount: the principal is a role or user of an account
+	// other than the resource's: inferred, as for a trust policy, since this
+	// snapshot does not read the policies of that account.
+	BasisIAMLensCrossAccount = "iam_lens_cross_account"
+	// BasisIAMLensUnknownAccount: the resource's account is not known, so the
+	// principal may be of another.
+	BasisIAMLensUnknownAccount = "iam_lens_unknown_account"
+	// BasisIAMLensAccount: the principal is an account (its :root), so any
+	// principal in it that its own policies allow.
+	BasisIAMLensAccount = "iam_lens_account"
 )
 
 // The caps on what an iam-lens file may hold. A file past one is a failed
@@ -44,6 +59,10 @@ const (
 	maxAccessEdges      = 100000
 	maxAccessPrincipals = 10000
 	maxARNLen           = 2048
+	// What every file together may hold: past either, a file is a failed
+	// source with no edge, taking the files in the order of their locations.
+	maxAccessTotalBytes   = 128 << 20
+	maxAccessTotalEntries = 500000
 )
 
 // AccessEntry is one allowed pair of a principal and an action on the resource
@@ -69,6 +88,10 @@ type AccessResult struct {
 	// organization, an organizational unit or a principal the resource's policy
 	// names, so that who may reach it is not all it says.
 	Incomplete bool
+	// Scoped says iam-lens did not check every account (its
+	// allAccountsChecked is false: a run limited to some accounts or
+	// principals), so that who may reach the resource is not all it lists.
+	Scoped bool
 }
 
 // Access is what one file of iam-lens results holds.
@@ -85,13 +108,38 @@ type AccessRead struct {
 	Err      error
 }
 
-// ReadAccessFiles reads each file in order. A file that fails is recorded and
-// does not stop the rest.
+// ReadAccessFiles reads each file, in the order of their locations, and holds
+// all of them to the total caps: a file that fails, or is past a cap, is
+// recorded and does not stop the rest. A location given twice is read once.
 func ReadAccessFiles(files []string) []AccessRead {
-	reads := make([]AccessRead, 0, len(files))
-	for _, f := range files {
+	return readAccessFiles(files, maxAccessTotalBytes, maxAccessTotalEntries)
+}
+
+func readAccessFiles(files []string, maxBytes, maxEntries int) []AccessRead {
+	sorted := append([]string(nil), files...)
+	sort.Strings(sorted)
+	reads := make([]AccessRead, 0, len(sorted))
+	bytesLeft, entriesLeft := maxBytes, maxEntries
+	for i, f := range sorted {
+		if i > 0 && f == sorted[i-1] {
+			reads = append(reads, reads[len(reads)-1])
+			continue
+		}
 		r := AccessRead{Location: f}
-		r.Doc, r.Err = ReadAccess(f)
+		var n int
+		r.Doc, n, r.Err = readAccess(f, bytesLeft)
+		bytesLeft -= n
+		if r.Err == nil {
+			entries := 0
+			for _, res := range r.Doc.Results {
+				entries += len(res.Entries)
+			}
+			if entries > entriesLeft {
+				r.Doc, r.Err = Access{}, fmt.Errorf("past the total of %d entries that all iam-lens files together may hold", maxEntries)
+			} else {
+				entriesLeft -= entries
+			}
+		}
 		reads = append(reads, r)
 	}
 	return reads
@@ -99,19 +147,35 @@ func ReadAccessFiles(files []string) []AccessRead {
 
 // ReadAccess reads the file at path as ParseAccess does, up to the size cap.
 func ReadAccess(path string) (Access, error) {
+	doc, _, err := readAccess(path, maxAccessBytes)
+	return doc, err
+}
+
+// readAccess reads a file of at most maxAccessBytes and of at most left bytes
+// (what is left of the total), and says how many bytes it read.
+func readAccess(path string, left int) (Access, int, error) {
+	limit := min(maxAccessBytes, left)
+	if limit <= 0 {
+		return Access{}, 0, fmt.Errorf("past the total of %d MiB that all iam-lens files together may be", maxAccessTotalBytes>>20)
+	}
 	f, err := os.Open(path)
 	if err != nil {
-		return Access{}, err
+		return Access{}, 0, err
 	}
 	defer f.Close()
-	raw, err := io.ReadAll(io.LimitReader(f, maxAccessBytes+1))
+	raw, err := io.ReadAll(io.LimitReader(f, int64(limit)+1))
 	if err != nil {
-		return Access{}, err
+		return Access{}, len(raw), err
 	}
-	if len(raw) > maxAccessBytes {
-		return Access{}, fmt.Errorf("larger than %d MiB, which an iam-lens file may not be", maxAccessBytes>>20)
+	if len(raw) > limit {
+		n := limit
+		if limit < maxAccessBytes {
+			return Access{}, n, fmt.Errorf("past the total of %d MiB that all iam-lens files together may be", maxAccessTotalBytes>>20)
+		}
+		return Access{}, n, fmt.Errorf("larger than %d MiB, which an iam-lens file may not be", maxAccessBytes>>20)
 	}
-	return ParseAccess(raw)
+	doc, err := ParseAccess(raw)
+	return doc, len(raw), err
 }
 
 // present is a member whose content is not read, only whether it is there
@@ -143,6 +207,7 @@ type rawAccessResult struct {
 	Resource *string `json:"resource"`
 	Result   *struct {
 		Allowed                     *entryList `json:"allowed"`
+		AllAccountsChecked          *bool      `json:"allAccountsChecked"`
 		AccountsNotFound            []string   `json:"accountsNotFound"`
 		OrganizationsNotFound       []string   `json:"organizationsNotFound"`
 		OrganizationalUnitsNotFound []string   `json:"organizationalUnitsNotFound"`
@@ -244,6 +309,7 @@ func ParseAccess(raw []byte) (Access, error) {
 			Resource: *it.Resource, Entries: *it.Result.Allowed,
 			Incomplete: len(it.Result.AccountsNotFound)+len(it.Result.OrganizationsNotFound)+
 				len(it.Result.OrganizationalUnitsNotFound)+len(it.Result.PrincipalsNotFound) > 0,
+			Scoped: it.Result.AllAccountsChecked != nil && !*it.Result.AllAccountsChecked,
 		}
 		if entries += len(r.Entries); entries > maxAccessEntries {
 			return Access{}, fmt.Errorf("more than %d entries", maxAccessEntries)
@@ -251,9 +317,32 @@ func ParseAccess(raw []byte) (Access, error) {
 		sort.Slice(r.Entries, func(a, b int) bool { return lessEntry(r.Entries[a], r.Entries[b]) })
 		doc.Results = append(doc.Results, r)
 	}
-	sort.SliceStable(doc.Results, func(a, b int) bool { return doc.Results[a].Resource < doc.Results[b].Resource })
+	// A full key, the resource and then what the result holds, so that the
+	// digest does not depend on the order the results came in.
+	sort.Slice(doc.Results, func(a, b int) bool { return lessResult(doc.Results[a], doc.Results[b]) })
 	doc.Digest = accessDigest(doc)
 	return doc, nil
+}
+
+func lessResult(a, b AccessResult) bool {
+	if a.Resource != b.Resource {
+		return a.Resource < b.Resource
+	}
+	if a.Incomplete != b.Incomplete {
+		return !a.Incomplete
+	}
+	if a.Scoped != b.Scoped {
+		return !a.Scoped
+	}
+	for i := 0; i < len(a.Entries) && i < len(b.Entries); i++ {
+		if lessEntry(a.Entries[i], b.Entries[i]) {
+			return true
+		}
+		if lessEntry(b.Entries[i], a.Entries[i]) {
+			return false
+		}
+	}
+	return len(a.Entries) < len(b.Entries)
 }
 
 func lessEntry(a, b AccessEntry) bool {
@@ -294,7 +383,7 @@ func accessDigest(d Access) string {
 	}
 	w("iam-lens")
 	for _, r := range d.Results {
-		w("resource", r.Resource, flag(r.Incomplete))
+		w("resource", r.Resource, flag(r.Incomplete), flag(r.Scoped))
 		for _, e := range r.Entries {
 			w(e.Principal, e.Service, e.Action, e.Level, flag(e.Conditional), flag(e.Patterns))
 		}
@@ -312,7 +401,9 @@ func accessSourceID(location string) string {
 type accessState struct {
 	files, failed, results int
 	notFound, rejected     int // results about a resource the snapshot lacks, or not a concrete ARN
-	incomplete             int
+	incomplete, scoped     int // results that name data iam-lens lacked, and results of a run that did not check every account
+	duplicates             int // --iam-lens locations given more than once
+	hashedARNs             int // AWS resources of a hashed inventory, which no ARN can be matched to
 	levels, patterns       int // entries of a level or a service that make no edge, and entries for patterns
 	skipped, rejectedP     int // principals not turned into edges, and principals not of the shape they say
 	cappedEdges            int
@@ -365,8 +456,15 @@ func hasControl(s string) bool {
 // lowest ID wins.
 func (b *builder) resourceARNs() map[string]string {
 	byARN := map[string]string{}
+	b.access.hashedARNs = 0
 	for id, n := range b.nodes {
-		if n.Kind != snapshot.KindResource || n.Cloud != "aws" || n.ARNOrPath == "" || b.preHashed[id+"\x00arn_or_path"] {
+		if n.Kind != snapshot.KindResource || n.Cloud != "aws" || n.ARNOrPath == "" {
+			continue
+		}
+		if b.preHashed[id+"\x00arn_or_path"] {
+			// An inventory written with --hash-ids: its ARN is a hash, which
+			// no ARN of a result can be matched to.
+			b.access.hashedARNs++
 			continue
 		}
 		if old, ok := byARN[n.ARNOrPath]; ok {
@@ -381,19 +479,49 @@ func (b *builder) resourceARNs() map[string]string {
 
 type accessKey struct{ kind, principal, resource string }
 
-type accessVal struct{ conf, basis, source string }
+// accessVal is what the entries for one edge say: whether every one of them
+// has a condition, and the source of the one kept.
+type accessVal struct {
+	conditional bool
+	source      string
+}
 
-// better says a is the value to keep over c: the stronger confidence, and among
-// equals the lowest basis and source, so that the order files and entries came
-// in changes nothing.
+// better says a is the value to keep over c: an unconditional entry over a
+// conditional one, and among equals the lowest source, so that the order files
+// and entries came in changes nothing.
 func (a accessVal) better(c accessVal) bool {
-	if rank(a.conf) != rank(c.conf) {
-		return rank(a.conf) > rank(c.conf)
-	}
-	if a.basis != c.basis {
-		return a.basis < c.basis
+	if a.conditional != c.conditional {
+		return !a.conditional
 	}
 	return a.source < c.source
+}
+
+// isPublic says a principal of an iam-lens entry is anyone: "anonymous"
+// (unsigned access) or "*".
+func isPublic(principal string) bool { return principal == "anonymous" || principal == "*" }
+
+// accessBasis is the basis and confidence of an edge, from where the principal
+// starts it (as a trust policy's does: a role of another account, or an
+// account, is inferred) and from the entries having conditions. A condition
+// is not evaluated: it makes the edge inferred.
+func accessBasis(ref principalRef, public, conditional bool) (basis, conf string) {
+	switch {
+	case public && conditional:
+		return BasisIAMLensPublicCondition, snapshot.Inferred
+	case public:
+		return BasisIAMLensPublic, snapshot.Inferred
+	case conditional:
+		return BasisIAMLensCondition, snapshot.Inferred
+	}
+	switch {
+	case ref.basis == BasisTrustCrossAccount:
+		return BasisIAMLensCrossAccount, snapshot.Inferred
+	case ref.basis == BasisTrustAccount:
+		return BasisIAMLensAccount, snapshot.Inferred
+	case ref.conf == snapshot.Inferred:
+		return BasisIAMLensUnknownAccount, snapshot.Inferred
+	}
+	return BasisIAMLens, ref.conf
 }
 
 // addAccess adds a can_read or can_write edge, from each principal an iam-lens
@@ -419,6 +547,7 @@ func (b *builder) addAccess(reads []AccessRead) {
 			Status: snapshot.StatusOK,
 		}
 		if seen[src.SourceID] {
+			b.access.duplicates++
 			continue
 		}
 		seen[src.SourceID] = true
@@ -435,6 +564,9 @@ func (b *builder) addAccess(reads []AccessRead) {
 			b.access.results++
 			if res.Incomplete {
 				b.access.incomplete++
+			}
+			if res.Scoped {
+				b.access.scoped++
 			}
 			if !validARN(res.Resource) {
 				b.access.rejected++
@@ -455,14 +587,13 @@ func (b *builder) addAccess(reads []AccessRead) {
 					b.access.levels++
 					continue
 				}
-				v := accessVal{snapshot.Computed, BasisIAMLens, src.SourceID}
-				switch {
-				case e.Principal == "anonymous":
-					v.conf, v.basis = snapshot.Inferred, BasisIAMLensPublic
-				case e.Conditional:
-					v.conf, v.basis = snapshot.Inferred, BasisIAMLensCondition
+				v := accessVal{e.Conditional, src.SourceID}
+				// "*" and "anonymous" are one principal: anyone.
+				principal := e.Principal
+				if isPublic(principal) {
+					principal = "anonymous"
 				}
-				k := accessKey{kind, e.Principal, to}
+				k := accessKey{kind, principal, to}
 				if old, ok := agg[k]; !ok || v.better(old) {
 					agg[k] = v
 				}
@@ -483,22 +614,30 @@ func (b *builder) addAccess(reads []AccessRead) {
 		}
 		return a.resource < c.resource
 	})
+	// A principal is resolved for the account of the resource it reaches, as a
+	// trust policy's is for the role's: a role of another account is
+	// inferred. The distinct principals are what the cap counts.
+	type resolvedKey struct{ principal, account string }
 	type resolved struct {
-		id      string
+		ref     principalRef
 		outcome int
 	}
-	principals := map[string]resolved{}
+	resolvedBy := map[resolvedKey]resolved{}
+	distinct := map[string]bool{}
 	for _, k := range keys {
 		v := agg[k]
-		p, ok := principals[k.principal]
+		account := b.resourceAccount(k.resource)
+		rk := resolvedKey{k.principal, account}
+		p, ok := resolvedBy[rk]
 		if !ok {
-			if len(principals) >= maxAccessPrincipals {
+			if !distinct[k.principal] && len(distinct) >= maxAccessPrincipals {
 				b.access.cappedPrincipals++
 				continue
 			}
-			ref, outcome := b.principal(&docState{source: v.source}, accessPrincipal(k.principal), "")
-			p = resolved{ref.id, outcome}
-			principals[k.principal] = p
+			distinct[k.principal] = true
+			ref, outcome := b.principal(&docState{source: v.source}, accessPrincipal(k.principal), account)
+			p = resolved{ref, outcome}
+			resolvedBy[rk] = p
 		}
 		switch {
 		case p.outcome == principalRejected:
@@ -508,10 +647,22 @@ func (b *builder) addAccess(reads []AccessRead) {
 		case b.access.edges >= maxAccessEdges:
 			b.access.cappedEdges++
 		default:
-			b.addEdge(k.kind, v.basis, v.conf, p.id, k.resource, v.source)
+			basis, conf := accessBasis(p.ref, isPublic(k.principal), v.conditional)
+			b.addEdge(k.kind, basis, conf, p.ref.id, k.resource, v.source)
 			b.access.edges++
 		}
 	}
+}
+
+// resourceAccount is the account of a resource of the snapshot: the one its
+// ARN names where it has one (an S3 bucket's has none), else the one its node
+// has, else none.
+func (b *builder) resourceAccount(id string) string {
+	n := b.nodes[id]
+	if parts := strings.SplitN(n.ARNOrPath, ":", 6); len(parts) == 6 && accountID.MatchString(parts[4]) {
+		return parts[4]
+	}
+	return n.Account
 }
 
 // accessPrincipal reads the principal of an iam-lens entry (an ARN, a service
@@ -521,7 +672,7 @@ func accessPrincipal(s string) tfstate.TrustPrincipal {
 	switch {
 	case len(s) > maxPrincipalLen || hasControl(s):
 		return tfstate.TrustPrincipal{Type: "*", Value: "rejected"}
-	case s == "anonymous":
+	case s == "anonymous" || s == "*":
 		return tfstate.TrustPrincipal{Type: "*", Value: "*"}
 	case strings.Contains(s, "*"):
 		// A pattern is not a principal: iam-lens names the ones it found.
@@ -541,7 +692,7 @@ func (b *builder) accessLimits() []string {
 	if a.files == 0 && a.failed == 0 {
 		return nil
 	}
-	s := []string{"can_read and can_write edges come only from iam-lens results read from a file: infra-ontology does not run iam-lens, read policies or call the cloud, so an edge says iam-lens judged the principal allowed on the IAM data it was given, which this snapshot does not hold and which may be older than the rest of it. Actions that read or list make can_read; actions that write, tag or change permissions make can_write; another level of action and any sts action make no edge. A result with a condition makes an inferred edge, and the condition is not kept; anonymous access makes an inferred edge too. Only the resources the snapshot holds have edges."}
+	s := []string{"can_read and can_write edges come only from iam-lens results read from a file: infra-ontology does not run iam-lens, read policies or call the cloud, so an edge says iam-lens judged the principal allowed on the IAM data it was given, which this snapshot does not hold and which may be older than the rest of it. can_read and can_write mean only that iam-lens classes an action the principal is allowed as Read or List (can_read), or as Write, Tagging or Permissions management (can_write): they do not say the principal can read or write the data in the resource, since those levels include metadata reads such as s3:GetBucketLocation and actions such as lambda:InvokeFunction, kms:Decrypt, sns:Publish, sqs:SendMessage and iam:PassRole. Another level of action and any sts action make no edge. A result with a condition makes an inferred edge, and the condition is not kept; public access (anonymous or *), a principal of another account or of an account not known, and an account principal make inferred edges too. Only the resources the snapshot holds have edges."}
 	if a.failed > 0 {
 		s = append(s, fmt.Sprintf("%d iam-lens files could not be read, or were past the size caps, and have no edges.", a.failed))
 	}
@@ -550,6 +701,15 @@ func (b *builder) accessLimits() []string {
 	}
 	if a.rejected > 0 {
 		s = append(s, fmt.Sprintf("%d iam-lens results are for a resource that is not a concrete ARN (a wildcard, or too long), and have no edge.", a.rejected))
+	}
+	if a.duplicates > 0 {
+		s = append(s, fmt.Sprintf("%d iam-lens locations were given more than once and were read once.", a.duplicates))
+	}
+	if a.hashedARNs > 0 {
+		s = append(s, fmt.Sprintf("%d AWS resources of an inventory written with --hash-ids have an ARN that is a hash, which no iam-lens resource can be matched to: results for them are not edges, and some of the results counted above as for a resource this snapshot does not hold may be for them.", a.hashedARNs))
+	}
+	if a.scoped > 0 {
+		s = append(s, fmt.Sprintf("%d iam-lens results say they did not check every account (allAccountsChecked is false: a run limited by a principal scope or to some accounts), so who can reach the resource is not all they list.", a.scoped))
 	}
 	if a.incomplete > 0 {
 		s = append(s, fmt.Sprintf("%d iam-lens results say they found no collected data for an account, organization or principal the resource's policy names, so who can reach the resource is not all they list.", a.incomplete))
