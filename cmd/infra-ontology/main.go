@@ -39,7 +39,9 @@ commands:
   query <dir> --sql TEXT              read-only SQL over a snapshot, with row caps and a
   query <dir> --stored NAME [--param k=v ...]
                                       citation of the snapshot, query and result
-                                      (--json, --answer-out FILE, --list)
+                                      (--json, --answer-out FILE, --list). A snapshot that does not
+                                      verify exits 4, as verify does; the signature flags of verify
+                                      apply (a --key or identity given requires a signature)
   verify --answer FILE [--snapshot <dir>]
                                       re-run a cited answer against its snapshot
   diff [--json] <a> [<b>]             what changed from snapshot a to snapshot b

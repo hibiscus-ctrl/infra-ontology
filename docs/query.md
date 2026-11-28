@@ -5,12 +5,15 @@
 ```sh
 infra-ontology query <snapshot-dir> --sql "SELECT kind, count(*) AS n FROM nodes GROUP BY kind ORDER BY kind"
 infra-ontology query <snapshot-dir> --stored blast --param node=module.network --param depth=3
+infra-ontology query <snapshot-dir> --key cosign.pub --sql "..."   # only if the snapshot is signed by that key
 infra-ontology query --list                            # the stored queries and their parameters
 infra-ontology query <snapshot-dir> --sql "..." --json --answer-out answer.json
 infra-ontology verify --answer answer.json [--snapshot <snapshot-dir>]
 ```
 
-The command reads local files only. It first verifies the snapshot (the same check as `snapshot verify`), so an answer never cites a snapshot whose files do not match its manifest.
+The command reads local files only. It first verifies the snapshot (the same check as `snapshot verify`), so an answer never cites a snapshot whose files do not match its manifest. A snapshot that does not verify exits 4, the code of `verify`, `diff` and `serve-mcp` (a refused query exits 1, a bad flag 2), and nothing is printed.
+
+`query` takes the signature flags of `verify` and `serve-mcp` (`--key`, `--certificate-identity` with `--certificate-oidc-issuer` or the regexp forms, `--trusted-root`, `--require-signature`), with the same meaning ([signing.md](signing.md#verifying)): a key or an identity to trust requires a snapshot with a signature that verifies, and an unsigned or wrongly signed one exits 4 before any query runs. With none of them the signature is not checked, though a signature file that is not a Sigstore bundle still fails.
 
 ## What a query may read
 

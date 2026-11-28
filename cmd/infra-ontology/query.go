@@ -16,6 +16,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/hibiscus-ctrl/infra-ontology/internal/query"
+	"github.com/hibiscus-ctrl/infra-ontology/internal/signing"
 	"github.com/hibiscus-ctrl/infra-ontology/internal/snapshot"
 )
 
@@ -51,6 +52,7 @@ func runQuery(args []string, stdout, stderr io.Writer) int {
 	maxBytes := fs.Int64("max-bytes", query.DefaultMaxBytes, "the approximate most bytes of result")
 	timeout := fs.Duration("timeout", query.DefaultTimeout, "stop the query after this long")
 	memory := fs.String("memory", "512MB", "the engine's memory limit")
+	vf := addVerifyFlags(fs)
 	dirs, ok := parse(fs, args, 0, 1, stderr)
 	if !ok {
 		return exitUsage
@@ -69,13 +71,30 @@ func runQuery(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "infra-ontology query: --param goes with --stored")
 		return exitUsage
 	}
+	v, err := vf.check()
+	if err != nil {
+		fmt.Fprintf(stderr, "infra-ontology query: %v\n", err)
+		return exitUsage
+	}
 	req := query.Request{
 		SQL: *sqlText, Stored: *stored, Params: ps,
 		Caps: query.Caps{MaxRows: *limit, MaxBytes: *maxBytes, Timeout: *timeout},
 	}
 	ctx, stop := signalContext()
 	defer stop()
-	out, err := query.Run(ctx, query.New(), dirs[0], query.Options{Mode: query.ModeTables, MemoryLimit: *memory}, req)
+	// A snapshot that does not verify, or whose signature is not what was
+	// asked for, exits as verify, diff and serve-mcp do.
+	loaded, err := snapshot.Load(dirs[0])
+	if err != nil {
+		fmt.Fprintf(stderr, "infra-ontology query: %v\n", err)
+		return exitVerifyFailed
+	}
+	// The signature is checked over the manifest bytes Load hashed.
+	if problem := signatureProblem(signing.CheckBytes(dirs[0], loaded.ManifestRaw, v), vf.required()); problem != "" {
+		fmt.Fprintf(stderr, "infra-ontology query: %s\n", printable(problem))
+		return exitVerifyFailed
+	}
+	out, err := query.RunLoaded(ctx, query.New(), loaded, query.Options{Mode: query.ModeTables, MemoryLimit: *memory}, req)
 	if err != nil {
 		if errors.Is(err, query.ErrUnavailable) {
 			explainNoEngine(stderr, dirs[0], req)

@@ -35,6 +35,12 @@ func Run(ctx context.Context, eng Engine, dir string, o Options, req Request) (*
 	if err != nil {
 		return nil, err
 	}
+	return RunLoaded(ctx, eng, loaded, o, req)
+}
+
+// RunLoaded is Run over a snapshot already loaded: a caller that checks more
+// than the hashes (a signature) loads it, checks, and asks.
+func RunLoaded(ctx context.Context, eng Engine, loaded *snapshot.Loaded, o Options, req Request) (*Output, error) {
 	sess, err := OpenVerified(ctx, eng, loaded, o)
 	if err != nil {
 		return nil, err

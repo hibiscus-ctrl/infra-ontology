@@ -90,11 +90,8 @@ func runVerify(args []string, stdout, stderr io.Writer) int {
 	// The signature is checked over the manifest bytes the verification read.
 	res, manifest := snapshot.VerifyWithManifest(dirs[0])
 	sig := signing.CheckBytes(dirs[0], manifest, v)
-	switch {
-	case sig.State == signing.Invalid:
-		res.Problems = append(res.Problems, signing.File+": "+sig.Problem)
-	case vf.required() && sig.State != signing.Verified:
-		res.Problems = append(res.Problems, "no signature that verifies: one is required (--require-signature, or a --key or --certificate-identity to trust)")
+	if problem := signatureProblem(sig, vf.required()); problem != "" {
+		res.Problems = append(res.Problems, problem)
 	}
 	switch {
 	case *asJSON:

@@ -64,6 +64,19 @@ func (f verifyFlags) check() (signing.Verifier, error) {
 	return v, nil
 }
 
+// signatureProblem says what is wrong with a signature, or "" if nothing is: a
+// signature that is no bundle or does not check, or none that verifies when one
+// is required.
+func signatureProblem(sig signing.Status, required bool) string {
+	switch {
+	case sig.State == signing.Invalid:
+		return signing.File + ": " + sig.Problem
+	case required && sig.State != signing.Verified:
+		return "no signature that verifies: one is required (--require-signature, or a --key or --certificate-identity to trust)"
+	}
+	return ""
+}
+
 // runSign is `snapshot sign`: write manifest.sig.json, a Sigstore bundle over
 // the manifest, signed with a key file or keyless.
 func runSign(args []string, stdout, stderr io.Writer) int {
