@@ -57,14 +57,19 @@ type Read struct {
 	Err      error
 }
 
-// ReadAll reads each location in order. A location that fails is recorded
+// ReadAll reads each location in order, until ctx is done. A location that fails is recorded
 // and does not stop the rest, so that one state out of reach gives a partial
 // snapshot and not none.
 func ReadAll(ctx context.Context, locations []string, stores tfstate.Stores) []Read {
 	reads := make([]Read, 0, len(locations))
 	for _, loc := range locations {
 		r := Read{Location: loc}
-		r.Docs, r.Err = tfstate.Read(ctx, loc, stores)
+		if err := ctx.Err(); err != nil {
+			// A deadline or an interrupt stops the reading: what is left is not read.
+			r.Err = err
+		} else {
+			r.Docs, r.Err = tfstate.Read(ctx, loc, stores)
+		}
 		reads = append(reads, r)
 	}
 	return reads
@@ -262,13 +267,22 @@ func (b *builder) fail(r Read) {
 	})
 }
 
+// failureList is the text of the sources that could not be read, for the error
+// of a build that read nothing. In a hashed build it is the text the manifest
+// has for a failed source, since an error holds the locations the hashing hides.
 func (b *builder) failureList() string {
 	var sb strings.Builder
+	cause := func(err error) string {
+		if b.key != nil {
+			return withheld
+		}
+		return Scrub(err.Error())
+	}
 	for _, r := range b.failed {
-		sb.WriteString("\n  " + Scrub(r.Err.Error()))
+		sb.WriteString("\n  " + cause(r.Err))
 	}
 	for _, r := range b.failedInventories {
-		sb.WriteString("\n  " + Scrub(r.Err.Error()))
+		sb.WriteString("\n  " + cause(r.Err))
 	}
 	return sb.String()
 }

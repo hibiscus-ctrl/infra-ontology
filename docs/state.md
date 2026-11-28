@@ -133,7 +133,9 @@ The manifest's `limits` says, in plain text: that no live inventory was read, so
 
 ## Partial snapshots and exit codes
 
-A location that cannot be read does not stop the others. It becomes a source with status `failed` and a reason (credentials scrubbed), the manifest is `partial` and lists it, and the command exits with 3. If no state could be read, nothing is written and it exits with 1. A location that is not one `pkg/tfstate` reads, a path that does not exist, or a store this build does not link, is a usage error (2) before anything is read.
+A location that cannot be read does not stop the others. It becomes a source with status `failed` and a reason (credentials scrubbed), the manifest is `partial` and lists it, and the command exits with 3. If no state could be read, nothing is written and it exits with 1. A location that is not one `pkg/tfstate` reads, a path that does not exist, or a store this build does not link, is a usage error (2) before anything is read. With `--hash-ids`, the text the command prints when no state could be read is the same fixed reason the manifest gives a failed source, with no location and no store error.
+
+The build has a deadline: `--timeout` (10 minutes by default; `0` sets none) bounds the reading of the states and the building of the rows, and the build stops on SIGINT or SIGTERM too. A state not read by then is a source with status `failed` (the cause is the deadline or the signal), so a store that hangs gives a partial snapshot, or exit 1 if nothing was read.
 
 ## Build tags
 

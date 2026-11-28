@@ -24,6 +24,10 @@ const HashAlgorithm = "hmac-sha256"
 // snapshot: an error holds the paths and bucket names the hashing hides.
 const withheld = "could not be read; the cause is not kept because the snapshot hashes locations"
 
+// Withheld is withheld for the command, which prints it in place of the cause
+// of a failure in a hashed build.
+const Withheld = withheld
+
 // rawID is the ID and ARN a state gave a resource, as it wrote them.
 type rawID struct{ id, arn string }
 
