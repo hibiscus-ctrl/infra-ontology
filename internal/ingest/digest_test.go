@@ -15,14 +15,14 @@ import (
 // document_sha256 is an unkeyed hash, so it must not cover what the snapshot
 // withholds: anyone could confirm a guess at it.
 
-func sourceDigest(t *testing.T, res Result, kind string) string {
+func stateDigest(t *testing.T, res Result) string {
 	t.Helper()
 	for _, s := range res.Tables.Sources {
-		if s.Kind == kind {
+		if s.Kind == snapshot.SourceState {
 			return s.DocumentSHA256
 		}
 	}
-	t.Fatalf("no source of kind %s", kind)
+	t.Fatal("no state source")
 	return ""
 }
 
@@ -39,17 +39,17 @@ func digestState(t *testing.T, bucketID, password, tag string) Result {
 }
 
 func TestStateDigestLeavesOutWhatTheSnapshotWithholds(t *testing.T) {
-	base := sourceDigest(t, digestState(t, "acme-logs", "guess-one", "dev"), snapshot.SourceState)
+	base := stateDigest(t, digestState(t, "acme-logs", "guess-one", "dev"))
 	if len(base) != 64 {
 		t.Fatalf("digest %q", base)
 	}
-	if got := sourceDigest(t, digestState(t, "acme-logs", "guess-two", "dev"), snapshot.SourceState); got != base {
+	if got := stateDigest(t, digestState(t, "acme-logs", "guess-two", "dev")); got != base {
 		t.Error("the digest changes with the ID of a random_password or of a credential, which are withheld")
 	}
-	if got := sourceDigest(t, digestState(t, "acme-logs", "guess-one", "prod"), snapshot.SourceState); got != base {
+	if got := stateDigest(t, digestState(t, "acme-logs", "guess-one", "prod")); got != base {
 		t.Error("the digest changes with a tag")
 	}
-	if got := sourceDigest(t, digestState(t, "acme-other", "guess-one", "dev"), snapshot.SourceState); got == base {
+	if got := stateDigest(t, digestState(t, "acme-other", "guess-one", "dev")); got == base {
 		t.Error("the digest does not change with the ID of a resource that is written")
 	}
 }

@@ -420,7 +420,7 @@ func (s identifierSet) names(v string) bool {
 		}
 	}
 	for _, tok := range strings.FieldsFunc(l, func(r rune) bool {
-		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.')
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' && r != '_' && r != '.'
 	}) {
 		if s.tokens[tok] {
 			return true

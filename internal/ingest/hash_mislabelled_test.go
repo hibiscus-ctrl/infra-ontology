@@ -104,7 +104,7 @@ func TestMislabelledInventoryJoinsLikeAPlainOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ids := func(r Result) map[string]bool { return nodeIDs(r) }
+	ids := nodeIDs
 	for id := range ids(a) {
 		if !ids(b)[id] {
 			t.Errorf("node %s of the honest inventory is not in the mislabelled one", id)
