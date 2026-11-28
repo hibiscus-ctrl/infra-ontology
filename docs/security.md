@@ -53,7 +53,7 @@ Releases are built by a workflow from a tag: the checksums file is signed with c
 - **Tags are the one value kept**, from states and inventories, after the detectors. With `--hash-ids`, a tag value that holds an identifier of its node (the ID, the name, the ARN or the cloud path) is hashed, and a tag whose key holds one is dropped. A tag that is sensitive and does not look it gets through; `--drop-tags` removes them all.
 - **A hashed snapshot still shows the shape of the estate**: types, accounts, regions, counts and times. Two snapshots hashed with one key can be compared; keep the key.
 - **A snapshot is as true as what it was read from.** `limits` says what is missing and the age of the oldest source; it cannot say what was never read.
-- **The files are checked, then opened.** A process that can write into the snapshot folder between `verify` and the engine loading the tables could change one. Serve or audit a snapshot from a folder only you can write to ([signing.md](signing.md#what-is-read-once)).
+- **The files are read once.** The query engine loads the bytes that were hashed, from a private copy the process makes, not the snapshot folder a second time, so a change made to the folder after `verify` is not served ([signing.md](signing.md#what-is-read-once)).
 - **The engine is C++.** `govulncheck` cannot see DuckDB; read its security advisories when you bump the pinned version.
 - **The identity that reads state can read its secrets.** The tool drops them in memory, but the role you give it can see them. Scope it to the state it needs ([permissions.md](permissions.md)).
 - **Not covered:** vulnerabilities in Terraform, OpenTofu, DuckDB or the clouds themselves, and what someone does with an answer.

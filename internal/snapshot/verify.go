@@ -23,6 +23,35 @@ type Loaded struct {
 	// parsed. A signature over the manifest is checked against these, not
 	// against a second read of the file, which could have changed since.
 	ManifestRaw []byte
+	// files are the bytes of each table file that were hashed, by file name.
+	files map[string][]byte
+}
+
+// Materialize writes the bytes that verified (the manifest and the table
+// files) to a new private folder, and returns it with a function that deletes
+// it. Open a snapshot from this folder, not from Dir, so that what is served
+// is what was hashed: Dir can be changed between the hashing and a second
+// read, this folder is made by this process, readable by its user alone.
+func (l *Loaded) Materialize() (dir string, remove func(), err error) {
+	dir, err = os.MkdirTemp("", "infra-ontology-snapshot-")
+	if err != nil {
+		return "", nil, err
+	}
+	remove = func() { _ = os.RemoveAll(dir) }
+	write := func(name string, b []byte) error {
+		return os.WriteFile(filepath.Join(dir, name), b, 0o600)
+	}
+	if err := write(ManifestFile, l.ManifestRaw); err != nil {
+		remove()
+		return "", nil, err
+	}
+	for name, b := range l.files {
+		if err := write(name, b); err != nil {
+			remove()
+			return "", nil, err
+		}
+	}
+	return dir, remove, nil
 }
 
 // VerifyResult is what Verify found. It does not stop at the first problem.
@@ -182,7 +211,11 @@ func load(dir string) (*Loaded, VerifyResult, []byte) {
 	if !res.OK() {
 		return nil, res, raw
 	}
-	return &Loaded{Dir: dir, Manifest: m, Tables: t, ManifestRaw: raw}, res, raw
+	files := map[string][]byte{}
+	for _, info := range m.Tables {
+		files[info.File] = data[info.Name]
+	}
+	return &Loaded{Dir: dir, Manifest: m, Tables: t, ManifestRaw: raw, files: files}, res, raw
 }
 
 func schemaOf(table string) string {

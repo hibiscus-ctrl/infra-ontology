@@ -94,7 +94,7 @@ A key signature does not pass a keyless check and the reverse: `--key` requires 
 
 ## What is read once
 
-`verify`, `snapshot sign` and `serve-mcp` read `manifest.json` once: the signature is checked, or made, over the very bytes whose id and table hashes were verified, so the manifest cannot be swapped between the two checks. One gap remains, and it is not specific to signatures: the files are checked and the engine opens them later. A process that can write into the snapshot folder between `serve-mcp` verifying the tables and the engine loading them could change a table after its hash was checked. Keep a snapshot you serve or audit in a folder only you can write to.
+`verify`, `snapshot sign`, `query` and `serve-mcp` read each file once: the signature is checked, or made, over the very bytes whose id and table hashes were verified, so the manifest cannot be swapped between the two checks. The query engine does not read the snapshot folder again either: the bytes that were hashed are written to a private folder (made by the process, readable by its user alone), the engine loads its tables from there, and the folder is deleted when the session has them. A file swapped into the snapshot folder after the hashing is never served, and the manifest an answer cites is the manifest that was served.
 
 ## What a signature does not say
 

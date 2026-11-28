@@ -123,7 +123,8 @@ type Result struct {
 type Engine interface {
 	Name() string
 	// Open loads the snapshot folder into a session. The folder must already
-	// have verified; Open does not hash it.
+	// have verified; Open does not hash it. Callers open a private copy of the
+	// bytes that verified (OpenVerified), not the snapshot's own folder.
 	Open(ctx context.Context, snapshotDir string, o Options) (Session, error)
 }
 

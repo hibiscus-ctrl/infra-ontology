@@ -280,7 +280,7 @@ func runVerifyTop(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "infra-ontology verify: %v\n", err)
 		return exitVerifyFailed
 	}
-	sess, err := query.New().Open(ctx, dir, query.Options{Mode: query.ModeTables})
+	sess, err := query.OpenVerified(ctx, query.New(), loaded, query.Options{Mode: query.ModeTables})
 	if err != nil {
 		fmt.Fprintf(stderr, "infra-ontology verify: %v\n", err)
 		return exitFailed

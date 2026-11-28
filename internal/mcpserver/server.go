@@ -161,7 +161,7 @@ func newServer(ctx context.Context, cfg Config) (*server, error) {
 	}
 	// The one long-lived session: tables in a private database file,
 	// attached read-only, then locked.
-	sess, err := eng.Open(ctx, cfg.Dir, query.Options{Mode: query.ModeROAttach, MemoryLimit: cfg.MemoryLimit})
+	sess, err := query.OpenVerified(ctx, eng, loaded, query.Options{Mode: query.ModeROAttach, MemoryLimit: cfg.MemoryLimit})
 	if err != nil {
 		return nil, err
 	}
