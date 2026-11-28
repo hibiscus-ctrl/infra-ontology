@@ -218,7 +218,7 @@ type builder struct {
 	joined       map[string]bool
 	stateManaged []string
 
-	credentialIDs, tagsDropped, claimedManaged, mislabelled int
+	credentialIDs, tagsDropped, claimedManaged, mislabelled, tagValuesHashed int
 
 	// key hashes the snapshot, if not nil (see Options.HashKey). raw holds the
 	// ID and ARN a state gave each resource node, as written, to be matched to
@@ -574,6 +574,9 @@ func (b *builder) limits() string {
 	s = append(s, b.readFrom()...)
 	if b.key != nil {
 		s = append(s, "IDs, names, Terraform addresses and state locations are HMAC-SHA256 hashes under a key this snapshot does not hold; types, accounts, regions and counts are readable.")
+		if b.tagValuesHashed > 0 {
+			s = append(s, strconv.Itoa(b.tagValuesHashed)+" tag values have the shape of a cloud identifier (an ARN, a resource path, an account number, an ID, a URL) or hold an ID, a state location or a module path of this snapshot, and are hashed with the same key.")
+		}
 	}
 	if b.o.DropAddresses {
 		s = append(s, "Terraform addresses, module paths and the Terraform names of resources and module calls are left out of the nodes, and so are the tags whose key or value holds one of them.")

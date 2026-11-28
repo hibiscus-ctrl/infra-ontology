@@ -46,6 +46,8 @@ An inventory that hashes its IDs (`infraharvest export --hash-ids`) is matched t
 
 Inventories that are not hashed are matched in the clear whatever `--hash-ids` says, and their IDs, names, addresses and paths are hashed as the snapshot is written.
 
+The `ids_hashed` flag of a document is a claim, and is checked: a hashed inventory must hold only values with the shape of a hash (64 hexadecimal digits) in its IDs, names, addresses, module paths and roots. One that holds any other is read as not hashed, and `limits` says how many were, so that with `--hash-ids` its values are hashed here with the key and a document that is mislabelled cannot put a raw identifier into a snapshot whose manifest says `hmac-sha256`.
+
 A resource listed by more than one document is one node: it keeps the status that knows most (`managed`, then `other_iac`, then `unmanaged`) and what each document gives.
 
 ## Missing resources
