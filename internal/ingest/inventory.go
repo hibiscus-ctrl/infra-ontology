@@ -459,10 +459,18 @@ func parseOCSF(raw []byte) (Inventory, error) {
 	return inv, nil
 }
 
-// digestOf is the SHA-256 of what is kept of an inventory, in the order of
-// its resources: like a state's, it is not the hash of the file's bytes, but
-// changes whenever anything this reader keeps changes.
-func digestOf(inv Inventory) string {
+// digestOf is the SHA-256 of what an inventory's rows say, in the order of its
+// resources: like a state's, it is not the hash of the file's bytes. It is
+// unkeyed, so it covers what is written to the nodes and no more: a resource
+// left out for an ID that is a credential is not in it, a name or an address
+// that is one counts as empty, and the tags are left out (a hash over raw tag
+// values would let anyone confirm a guess at one, even one the filter drops).
+// A change to a tag alone does not change it.
+func digestOf(inv Inventory) string { return digestFor(inv, false) }
+
+// digestFor is digestOf, and with dropAddresses it leaves out the addresses
+// and module paths too, which such a snapshot does not hold.
+func digestFor(inv Inventory, dropAddresses bool) string {
 	h := sha256.New()
 	w := func(fields ...string) {
 		for _, f := range fields {
@@ -471,7 +479,7 @@ func digestOf(inv Inventory) string {
 		}
 		h.Write([]byte{'\n'})
 	}
-	w(inv.Schema, inv.Tool, inv.ToolVersion, inv.GeneratedAt.Format(time.RFC3339))
+	w(inv.Schema, clearCredential(inv.Tool), clearCredential(inv.ToolVersion), inv.GeneratedAt.Format(time.RFC3339))
 	if inv.Coverage != nil {
 		// What the listing could not read decides what its absences mean, so
 		// a change to it changes the digest.
@@ -495,16 +503,15 @@ func digestOf(inv Inventory) string {
 	if f := inv.Filters; f != nil {
 		w("filters", fmt.Sprint(f.ID, f.Tag, f.Where, f.Services, f.Group, f.Partial))
 	}
-	for _, r := range inv.Resources {
+	for _, res := range inv.Resources {
+		r, ok := clearResource(res)
+		if !ok {
+			continue
+		}
+		if dropAddresses {
+			r.Address, r.Module = "", ""
+		}
 		w(r.Cloud, r.Account, r.Region, r.Type, r.ID, r.CloudID, r.Name, r.Status, r.Basis, r.Address, r.Module, r.Root)
-		keys := make([]string, 0, len(r.Tags))
-		for k := range r.Tags {
-			keys = append(keys, k)
-		}
-		slices.Sort(keys)
-		for _, k := range keys {
-			w("tag", k, r.Tags[k])
-		}
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

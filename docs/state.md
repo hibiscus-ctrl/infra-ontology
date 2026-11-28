@@ -129,7 +129,7 @@ A test builds a snapshot from the fixtures, with the flag alone and with `--hash
 
 The manifest's `limits` says, in plain text: that no live inventory was read, so nothing is marked unmanaged (with [`--inventory`](inventory.md), what it says instead); which states `terraform_remote_state` reads that are not in the snapshot; how many dependencies name an address the state does not hold; how many resources more than one state holds; and how many ids were left out. A resource whose ARN or ID does not carry an account or a region has none.
 
-`document_sha256` of a source is the hash of what the reader kept of the state (see `digest` in `internal/ingest`), not of the state's bytes, which the reader does not keep. It leaves out the tags, on purpose: an unkeyed hash over raw tag values would let anyone confirm a guess at one, so a change to a tag alone does not change it.
+`document_sha256` of a source is the hash of what the snapshot says of the state (see `digest` in `internal/ingest`), not of the state's bytes, which the reader does not keep: its serial, lineage and version, and the address, module, type, name, ID, ARN, account and region of each node as they are written, its dependencies and where its remote states read from. It is unkeyed (and with `--hash-ids` hashed again under the key), so it leaves out what the snapshot withholds, on purpose: the tags, the IDs left out for being credentials or made up by Terraform (`random_*` and the providers whose IDs are free text), and the names of outputs. A change to a tag alone does not change it. With `--drop-addresses` it leaves out the addresses, modules, names and dependencies too.
 
 ## Partial snapshots and exit codes
 

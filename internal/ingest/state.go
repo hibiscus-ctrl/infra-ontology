@@ -326,13 +326,14 @@ func (b *builder) addDocument(d tfstate.Document) *docState {
 	src := snapshot.Source{
 		SourceID: s.source, Kind: snapshot.SourceState, Backend: BackendOf(d.Source), Location: loc,
 		Workspace: WorkspaceOf(d.Source), Lineage: d.Lineage, TerraformVersion: d.TerraformVersion,
-		DocumentSHA256: digest(d), CollectedAt: b.at(),
-		Collector: b.o.Collector, CollectorVersion: b.o.CollectorVersion, Status: snapshot.StatusOK,
+		CollectedAt: b.at(),
+		Collector:   b.o.Collector, CollectorVersion: b.o.CollectorVersion, Status: snapshot.StatusOK,
 	}
 	if d.Serial > 0 || d.Lineage != "" {
 		serial := d.Serial
 		src.Serial = &serial
 	}
+	srcIndex := len(b.sources)
 	b.sources = append(b.sources, src)
 
 	s.root = b.nodeID(snapshot.KindStateRoot, "", "", "", "", loc)
@@ -373,6 +374,7 @@ func (b *builder) addDocument(d tfstate.Document) *docState {
 			}
 		}
 	}
+	b.sources[srcIndex].DocumentSHA256 = b.digest(s)
 	return s
 }
 
@@ -680,13 +682,20 @@ func (b *builder) readFrom() []string {
 		"Attribute values and output values are never read: the only values kept from a resource are its id, ARN and its tags, less the tags that look like secrets. A resource in both has the tags of its inventory, or those of its state where the inventory has none."}
 }
 
-// digest is the SHA-256 of what is kept of a state: its serial, lineage and
-// version, and the address, type, id and dependencies of each instance. It is
-// not the hash of the state's bytes, which are not kept. Tags are kept but
-// left out of it on purpose: an unkeyed hash over the raw tag values would let
-// anyone confirm a guess at one, a secret that no detector caught included.
-// So a change to a tag alone does not change the digest.
-func digest(d tfstate.Document) string {
+// digest is the SHA-256 of what a state's rows say: its serial, lineage and
+// version, and, for each instance, the address, module, type, name, id, ARN,
+// account and region of its node (as written, so an id the snapshot withholds
+// is not in it) and the dependencies; and where each terraform_remote_state
+// reads from. It is not the hash of the state's bytes, which are not kept.
+// It is unkeyed, so it leaves out what the snapshot leaves out: attribute
+// and output values, the tags (a hash over raw tag values would let anyone
+// confirm a guess at one, a secret that no detector caught included), and
+// the id of an instance withheld for being a credential or made up by
+// Terraform. A change to a tag alone does not change it. With
+// DropAddresses it leaves out the addresses, modules, names and dependencies
+// too.
+func (b *builder) digest(s *docState) string {
+	d := s.doc
 	h := sha256.New()
 	w := func(fields ...string) {
 		for _, f := range fields {
@@ -696,14 +705,22 @@ func digest(d tfstate.Document) string {
 		h.Write([]byte{'\n'})
 	}
 	w(strconv.FormatInt(d.Serial, 10), d.Lineage, d.TerraformVersion)
-	for _, in := range d.Instances {
-		w(append([]string{in.Mode, in.Address, in.Provider, in.ID, in.ARN, in.IdentityID}, in.Dependencies...)...)
-	}
-	for _, o := range d.Outputs {
-		w("output", o.Name, strconv.FormatBool(o.Sensitive))
+	for i, in := range s.instances {
+		n := s.members[i].node
+		fields := []string{in.Mode, n.TFType, n.NativeID, n.ARNOrPath, n.Account, n.Region}
+		if !b.o.DropAddresses {
+			fields = append(fields, in.Address, n.Module, n.Name)
+			fields = append(fields, in.Dependencies...)
+		}
+		w(fields...)
 	}
 	for _, r := range d.RemoteStates {
-		w("remote", r.Address, r.Backend, r.Account, r.Bucket, r.Key, r.Host, r.Organization, r.Workspace)
+		loc, _ := remoteLocation(r, d.Source)
+		if b.o.DropAddresses {
+			w("remote", r.Backend, loc)
+		} else {
+			w("remote", r.Address, r.Backend, loc)
+		}
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

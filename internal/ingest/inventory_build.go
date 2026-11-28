@@ -130,6 +130,9 @@ func (b *builder) openInventories(reads []InventoryRead) []*invResource {
 			inv.IDsHashed = false
 			b.mislabelled++
 		}
+		if b.o.DropAddresses {
+			inv.Digest = digestFor(inv, true)
+		}
 		src.DocumentSHA256, src.Collector, src.CollectorVersion = inv.Digest, firstOf(clearCredential(inv.Tool), src.Collector), firstOf(clearCredential(inv.ToolVersion), src.CollectorVersion)
 		if !inv.GeneratedAt.IsZero() {
 			src.CollectedAt = inv.GeneratedAt.UTC().Format(time.RFC3339)
@@ -172,13 +175,32 @@ func hashShaped(inv Inventory) bool {
 	return true
 }
 
+// clearResource is what is written of a resource of an inventory: not the
+// resource at all (false) if its ID or type is a credential, and otherwise it
+// with a name, an address, a module, a root, an account or a region that is a
+// credential left empty, and the root without what Sanitise removes. The digest
+// of an inventory is made of it too.
+func clearResource(res Resource) (Resource, bool) {
+	if credentialLike(res.ID) || credentialLike(res.CloudID) || credentialLike(res.Type) {
+		return res, false
+	}
+	for _, p := range []*string{&res.Name, &res.Address, &res.Module, &res.Root, &res.Account, &res.Region} {
+		if credentialLike(*p) {
+			*p = ""
+		}
+	}
+	res.Root = Sanitise(res.Root)
+	return res, true
+}
+
 // mergeResource normalises one resource of an inventory into merged: it is
 // left out if its ID is a credential, its name and address are dropped if they
 // are, and its tags go through the secret detectors.
 func (b *builder) mergeResource(merged map[invKey]*invResource, inv Inventory, source string, res Resource) {
 	// An ID or a type that is a credential leaves the resource out: without
 	// them it cannot be placed.
-	if credentialLike(res.ID) || credentialLike(res.CloudID) || credentialLike(res.Type) {
+	res, ok := clearResource(res)
+	if !ok {
 		b.credentialIDs++
 		// It may be the resource a state holds: nothing is missing from this
 		// listing.
@@ -187,12 +209,6 @@ func (b *builder) mergeResource(merged map[invKey]*invResource, inv Inventory, s
 		}
 		return
 	}
-	for _, p := range []*string{&res.Name, &res.Address, &res.Module, &res.Root, &res.Account, &res.Region} {
-		if credentialLike(*p) {
-			*p = ""
-		}
-	}
-	res.Root = Sanitise(res.Root)
 	res.Tags = b.filterTags(res, inv.IDsHashed, res.CloudID)
 	arn := ""
 	if strings.HasPrefix(res.CloudID, "arn:") {
