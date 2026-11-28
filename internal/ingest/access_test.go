@@ -76,16 +76,17 @@ func TestAccessEdgesFromIAMLensResults(t *testing.T) {
 	has := func(line string) bool { return slices.Contains(got, line) }
 	for _, line := range []string{
 		// An S3 bucket's ARN names no account, so a principal may be of another.
-		`can_read/iam_lens_unknown_account/inferred aws_iam_role.app -> aws_s3_bucket.logs["app"]`,
+		// The result for logs["app"] is incomplete and scoped: its edges are partial.
+		`can_read/iam_lens_partial/inferred aws_iam_role.app -> aws_s3_bucket.logs["app"]`,
 		`can_read/iam_lens_unknown_account/inferred aws_iam_role.app -> aws_s3_bucket.logs["audit"]`,
 		`can_read/iam_lens/computed aws_iam_role.app -> aws_db_instance.main`,
 		`can_read/iam_lens_unknown_account/inferred aws_iam_role.ci -> aws_s3_bucket.logs["audit"]`,
-		`can_write/iam_lens_unknown_account/inferred aws_iam_role.ci -> aws_s3_bucket.logs["app"]`,
-		`can_write/iam_lens_unknown_account/inferred aws_iam_user.deploy -> aws_s3_bucket.logs["app"]`,
-		`can_read/iam_lens_condition/inferred aws_iam_role.ci -> aws_s3_bucket.logs["app"]`,
-		`can_read/iam_lens_public/inferred any_principal:* -> aws_s3_bucket.logs["app"]`,
-		`can_write/iam_lens_condition/inferred service_principal:delivery.logs.amazonaws.com -> aws_s3_bucket.logs["app"]`,
-		`can_read/iam_lens_unknown_account/inferred aws_iam_role:arn:aws:iam::999999999999:role/partner -> aws_s3_bucket.logs["app"]`,
+		`can_write/iam_lens_partial/inferred aws_iam_role.ci -> aws_s3_bucket.logs["app"]`,
+		`can_write/iam_lens_partial/inferred aws_iam_user.deploy -> aws_s3_bucket.logs["app"]`,
+		`can_read/iam_lens_partial/inferred aws_iam_role.ci -> aws_s3_bucket.logs["app"]`,
+		`can_read/iam_lens_partial/inferred any_principal:* -> aws_s3_bucket.logs["app"]`,
+		`can_write/iam_lens_partial/inferred service_principal:delivery.logs.amazonaws.com -> aws_s3_bucket.logs["app"]`,
+		`can_read/iam_lens_partial/inferred aws_iam_role:arn:aws:iam::999999999999:role/partner -> aws_s3_bucket.logs["app"]`,
 	} {
 		if !has(line) {
 			t.Errorf("missing edge %s\nhave:\n%s", line, strings.Join(got, "\n"))
@@ -123,7 +124,9 @@ func TestAccessEdgesEndAtTheSnapshotsNodes(t *testing.T) {
 	tb := res.Tables
 	app := nodeAt(t, tb, accessIAMRoot, "aws_iam_role.app").NodeID
 	bucket := nodeAt(t, tb, netRoot, `aws_s3_bucket.logs["app"]`).NodeID
-	if !hasEdge(tb, snapshot.EdgeCanRead, BasisIAMLensUnknownAccount, app, bucket) {
+	// The fixture's result for the bucket is incomplete and scoped, so its edges
+	// are partial, whoever the principal is.
+	if !hasEdge(tb, snapshot.EdgeCanRead, BasisIAMLensPartial, app, bucket) {
 		t.Errorf("no can_read from the role to the bucket")
 	}
 	// The role that the trust policy of another role names is the same node the
@@ -241,7 +244,7 @@ func TestAccessResultsHoldNoPolicyTextOrConditionValues(t *testing.T) {
 		if got := len(accessEdges(res.Tables)); got != 1 {
 			t.Errorf("%s: %d edges", name, got)
 		}
-		if e := accessEdges(res.Tables); !strings.Contains(e[0], "iam_lens_condition/inferred") && name == "plain" {
+		if e := accessEdges(res.Tables); !strings.Contains(e[0], "iam_lens_partial/inferred") && name == "plain" {
 			t.Errorf("%s: %v", name, e)
 		}
 	}
@@ -809,5 +812,62 @@ func TestAccessTotalCapsAcrossFiles(t *testing.T) {
 				t.Errorf("reason %q", r.Err)
 			}
 		}
+	}
+}
+
+// accessDocWith is accessDoc with members of the response besides `allowed`,
+// such as "accountsNotFound":["999999999999"].
+func accessDocWith(t *testing.T, extra string, entries ...[3]string) string {
+	t.Helper()
+	var es []string
+	for _, e := range entries {
+		es = append(es, fmt.Sprintf(`{"principal":%q,"service":"rds","action":"DescribeDBInstances","level":%q%s}`, e[0], e[1], e[2]))
+	}
+	p := filepath.Join(t.TempDir(), "doc.json")
+	body := fmt.Sprintf(`{"resource":%q,"result":{"allowed":[%s],%s}}`, accessDB, strings.Join(es, ","), extra)
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// A result that says its analysis was not whole (no data for an account, an
+// organization or a principal; not every account checked) may be missing the
+// denies and the service control policies that would take an access away, so
+// its edges are inferred, with a basis of their own.
+func TestAccessEdgesOfAnIncompleteOrScopedResultAreInferred(t *testing.T) {
+	entries := [][3]string{
+		{"arn:aws:iam::111111111111:role/app", "read", ""},
+		{"arn:aws:iam::999999999999:role/partner", "read", ""},
+		{"anonymous", "read", ""},
+	}
+	for name, extra := range map[string]string{
+		"incomplete accounts":      `"accountsNotFound":["222222222222"]`,
+		"incomplete organizations": `"organizationsNotFound":["o-abc"]`,
+		"incomplete units":         `"organizationalUnitsNotFound":["ou-abc"]`,
+		"incomplete principals":    `"principalsNotFound":["arn:aws:iam::111111111111:role/gone"]`,
+		"scoped":                   `"allAccountsChecked":false`,
+	} {
+		got := accessEdges(buildAccess(t, accessReads(t), opts, accessDocWith(t, extra, entries...)).Tables)
+		if len(got) != len(entries) {
+			t.Errorf("%s: %d edges:\n%s", name, len(got), strings.Join(got, "\n"))
+		}
+		for _, line := range got {
+			if !strings.HasPrefix(line, "can_read/"+BasisIAMLensPartial+"/inferred ") {
+				t.Errorf("%s: edge %s", name, line)
+			}
+		}
+	}
+	// A whole result in the same file, or in another, gives the edge back its
+	// own basis: the lowest source wins among equals, and a whole one outranks.
+	whole := accessDocWith(t, `"allAccountsChecked":true`, entries[0])
+	partial := accessDocWith(t, `"allAccountsChecked":false`, entries[0])
+	got := accessEdges(buildAccess(t, accessReads(t), opts, partial, whole).Tables)
+	if len(got) != 1 || !strings.HasPrefix(got[0], "can_read/iam_lens/computed ") {
+		t.Errorf("a whole result and a partial one for the same edge: %v", got)
+	}
+	res := buildAccess(t, accessReads(t), opts, accessDocWith(t, `"allAccountsChecked":false`, entries[0]))
+	if !strings.Contains(res.Limits, BasisIAMLensPartial) {
+		t.Errorf("limits do not name the basis: %s", res.Limits)
 	}
 }

@@ -45,6 +45,13 @@ const (
 	// BasisIAMLensAccount: the principal is an account (its :root), so any
 	// principal in it that its own policies allow.
 	BasisIAMLensAccount = "iam_lens_account"
+	// BasisIAMLensPartial: the result says its analysis was not whole: iam-lens
+	// found no collected data for an account, an organization, an organizational
+	// unit or a principal the resource's policy names, or did not check every
+	// account, so a deny or a service control policy that would take the access
+	// away may be missing. Inferred, and it takes the place of the other bases of
+	// an edge (public, conditional, another account).
+	BasisIAMLensPartial = "iam_lens_partial"
 )
 
 // The caps on what an iam-lens file may hold. A file past one is a failed
@@ -483,13 +490,18 @@ type accessKey struct{ kind, principal, resource string }
 // has a condition, and the source of the one kept.
 type accessVal struct {
 	conditional bool
-	source      string
+	// partial says the result the entry is of was incomplete or scoped.
+	partial bool
+	source  string
 }
 
-// better says a is the value to keep over c: an unconditional entry over a
-// conditional one, and among equals the lowest source, so that the order files
+// better says a is the value to keep over c: an entry of a whole result over one
+// of an incomplete or scoped one, an unconditional entry over a conditional one, and among equals the lowest source, so that the order files
 // and entries came in changes nothing.
 func (a accessVal) better(c accessVal) bool {
+	if a.partial != c.partial {
+		return !a.partial
+	}
 	if a.conditional != c.conditional {
 		return !a.conditional
 	}
@@ -504,8 +516,10 @@ func isPublic(principal string) bool { return principal == "anonymous" || princi
 // starts it (as a trust policy's does: a role of another account, or an
 // account, is inferred) and from the entries having conditions. A condition
 // is not evaluated: it makes the edge inferred.
-func accessBasis(ref principalRef, public, conditional bool) (basis, conf string) {
+func accessBasis(ref principalRef, public, conditional, partial bool) (basis, conf string) {
 	switch {
+	case partial:
+		return BasisIAMLensPartial, snapshot.Inferred
 	case public && conditional:
 		return BasisIAMLensPublicCondition, snapshot.Inferred
 	case public:
@@ -587,7 +601,7 @@ func (b *builder) addAccess(reads []AccessRead) {
 					b.access.levels++
 					continue
 				}
-				v := accessVal{e.Conditional, src.SourceID}
+				v := accessVal{conditional: e.Conditional, partial: res.Incomplete || res.Scoped, source: src.SourceID}
 				// "*" and "anonymous" are one principal: anyone.
 				principal := e.Principal
 				if isPublic(principal) {
@@ -647,7 +661,7 @@ func (b *builder) addAccess(reads []AccessRead) {
 		case b.access.edges >= maxAccessEdges:
 			b.access.cappedEdges++
 		default:
-			basis, conf := accessBasis(p.ref, isPublic(k.principal), v.conditional)
+			basis, conf := accessBasis(p.ref, isPublic(k.principal), v.conditional, v.partial)
 			b.addEdge(k.kind, basis, conf, p.ref.id, k.resource, v.source)
 			b.access.edges++
 		}
@@ -692,7 +706,7 @@ func (b *builder) accessLimits() []string {
 	if a.files == 0 && a.failed == 0 {
 		return nil
 	}
-	s := []string{"can_read and can_write edges come only from iam-lens results read from a file: infra-ontology does not run iam-lens, read policies or call the cloud, so an edge says iam-lens judged the principal allowed on the IAM data it was given, which this snapshot does not hold and which may be older than the rest of it. can_read and can_write mean only that iam-lens classes an action the principal is allowed as Read or List (can_read), or as Write, Tagging or Permissions management (can_write): they do not say the principal can read or write the data in the resource, since those levels include metadata reads such as s3:GetBucketLocation and actions such as lambda:InvokeFunction, kms:Decrypt, sns:Publish, sqs:SendMessage and iam:PassRole. Another level of action and any sts action make no edge. A result with a condition makes an inferred edge, and the condition is not kept; public access (anonymous or *), a principal of another account or of an account not known, and an account principal make inferred edges too. Only the resources the snapshot holds have edges."}
+	s := []string{"can_read and can_write edges come only from iam-lens results read from a file: infra-ontology does not run iam-lens, read policies or call the cloud, so an edge says iam-lens judged the principal allowed on the IAM data it was given, which this snapshot does not hold and which may be older than the rest of it. can_read and can_write mean only that iam-lens classes an action the principal is allowed as Read or List (can_read), or as Write, Tagging or Permissions management (can_write): they do not say the principal can read or write the data in the resource, since those levels include metadata reads such as s3:GetBucketLocation and actions such as lambda:InvokeFunction, kms:Decrypt, sns:Publish, sqs:SendMessage and iam:PassRole. Another level of action and any sts action make no edge. A result that says its analysis was incomplete or scoped makes inferred edges with the basis iam_lens_partial, since a deny or a service control policy may be missing from it. A result with a condition makes an inferred edge, and the condition is not kept; public access (anonymous or *), a principal of another account or of an account not known, and an account principal make inferred edges too. Only the resources the snapshot holds have edges."}
 	if a.failed > 0 {
 		s = append(s, fmt.Sprintf("%d iam-lens files could not be read, or were past the size caps, and have no edges.", a.failed))
 	}
