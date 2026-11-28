@@ -49,9 +49,11 @@ func TestKeylessVerificationPolicy(t *testing.T) {
 
 	good := map[string]Verifier{
 		"exact":   {Identity: workflow, Issuer: issuer},
-		"regexp":  {IdentityRegexp: `^https://github\.com/acme/infra/\.github/workflows/.*@refs/heads/main$`, IssuerRegexp: `^https://token\.actions\.`},
-		"mixed":   {Identity: workflow, IssuerRegexp: `githubusercontent\.com$`},
-		"another": {IdentityRegexp: `acme/infra`, Issuer: issuer},
+		"regexp":  {IdentityRegexp: `^https://github\.com/acme/infra/\.github/workflows/.*@refs/heads/main$`, IssuerRegexp: `^https://token\.actions\..*`},
+		"mixed":   {Identity: workflow, IssuerRegexp: `.*githubusercontent\.com`},
+		"another": {IdentityRegexp: `.*acme/infra.*`, Issuer: issuer},
+		// An alternation is anchored as a whole, not branch by branch.
+		"an alternation": {IdentityRegexp: `https://github\.com/evil/x|` + strings.ReplaceAll(workflow, ".", `\.`), Issuer: issuer},
 	}
 	for name, v := range good {
 		t.Run(name, func(t *testing.T) {
@@ -71,7 +73,12 @@ func TestKeylessVerificationPolicy(t *testing.T) {
 		"another issuer":        {Identity: workflow, Issuer: "https://accounts.google.com"},
 		"an unanchored issuer":  {Identity: workflow, IssuerRegexp: `^https://accounts\.`},
 		"an identity regexp":    {IdentityRegexp: `^https://github\.com/evil/`, Issuer: issuer},
-		"identity, wrong issue": {IdentityRegexp: `acme`, Issuer: issuer + "/x"},
+		"identity, wrong issue": {IdentityRegexp: `.*acme.*`, Issuer: issuer + "/x"},
+		// A regular expression matches the whole value, not a part of it.
+		"a part of the identity":      {IdentityRegexp: `acme/infra`, Issuer: issuer},
+		"a prefix of the identity":    {IdentityRegexp: `https://github\.com/acme/infra`, Issuer: issuer},
+		"a part of the issuer":        {Identity: workflow, IssuerRegexp: `githubusercontent\.com`},
+		"an alternation's one branch": {IdentityRegexp: `https://github\.com/acme|https://github\.com/evil`, Issuer: issuer},
 	}
 	for name, v := range bad {
 		t.Run(name, func(t *testing.T) {
@@ -183,5 +190,35 @@ func TestKeylessSigningNeedsAToken(t *testing.T) {
 	}
 	if st := Inspect(dir); st.State != Unsigned {
 		t.Errorf("a failed keyless signature left %+v", st)
+	}
+}
+
+// A regular expression is matched against the whole identity. sigstore-go's
+// matcher is unanchored, so an identity a stranger can shape (a URL with the
+// repository in its query) would pass a pattern for the repository.
+func TestIdentityRegexpsAreAnchored(t *testing.T) {
+	vs, err := ca.NewVirtualSigstore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := read(t, filepath.Join(estate(t), snapshot.ManifestFile))
+	const evil = "https://evil/x?github.com/org/repo"
+	entity, err := vs.Sign(evil, issuer, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := Verifier{IdentityRegexp: `github.com/org/repo`, Issuer: issuer}
+	if _, err := v.verifyKeyless(entity, manifest, vs, 0); err == nil {
+		t.Error("an identity that only contains github.com/org/repo matched it")
+	}
+	// The same identity matches when the pattern is the whole of it.
+	v = Verifier{IdentityRegexp: `https://evil/x\?github\.com/org/repo`, Issuer: issuer}
+	if _, err := v.verifyKeyless(entity, manifest, vs, 0); err != nil {
+		t.Errorf("a pattern for the whole identity: %v", err)
+	}
+	// And so is the issuer.
+	v = Verifier{Identity: evil, IssuerRegexp: `githubusercontent.com`}
+	if _, err := v.verifyKeyless(entity, manifest, vs, 0); err == nil {
+		t.Error("an issuer that only contains the pattern matched it")
 	}
 }

@@ -17,7 +17,7 @@ What infra-ontology protects, from what, and where it stops. The rules are the r
 - **No attribute value and no output value.** State is read in memory, one resource at a time, and only the address, type, provider, module path, dependencies, `id`, `arn` and tags of each instance, the names of its outputs and the places a `terraform_remote_state` reads from are kept. Everything else is dropped as the state is read ([state.md](state.md#what-a-snapshot-keeps)). Tags (labels on Google Cloud) are read from state, and are the one value kept, after the secret detectors.
 - **No credential, ever.** Credentials come from the environment's default chains and are never taken from a flag's value, printed, stored or sent. A hash key (`--hash-ids`) is never written: not to the snapshot, not to the manifest, not to standard output or error.
 - **No secret-shaped identifier.** An `id` or ARN that has, or holds, the format of a credential, or is a URL with a user name, password or query parameter, is left out and counted in the manifest's `limits`; the ids of providers whose ids are free text or generated values (`random_*`, `http`, `external`, `local`, `null`, `time`, `archive`, `tls`) are not kept. Locations lose user names, passwords and unknown query parameters ([state.md](state.md#what-a-snapshot-keeps)).
-- **No query text or row in the audit log.** The MCP audit log holds hashes and counts ([mcp.md](mcp.md#the-audit-log)).
+- **No row, and no text of a query that ran, in the audit log.** The MCP audit log holds hashes and counts. A refused or invalid `query` call also keeps its SQL, cut at 1,024 bytes and on one line, so that what an agent tried can be reviewed ([mcp.md](mcp.md#the-audit-log)).
 
 ## Redaction
 
@@ -44,7 +44,7 @@ The planted-secret tests build snapshots from states and inventories that hold s
 
 ## Integrity and signing
 
-A snapshot is content-addressed: the manifest holds the SHA-256 of every table and the snapshot ID is the hash of the manifest, so `verify` catches a changed byte anywhere. That shows the snapshot is whole, not who made it. `snapshot sign` adds a Sigstore bundle over the manifest, from a key you hold or a keyless CI identity, and `verify` checks it against a key or an identity you trust ([signing.md](signing.md)). `serve-mcp` refuses a snapshot that does not verify, and with `--require-signature` one that is not signed by whom you expect.
+A snapshot is content-addressed: the manifest holds the SHA-256 of every table and the snapshot ID is the hash of the manifest, so `verify` catches a changed byte anywhere. That shows the snapshot is whole, not who made it. `snapshot sign` adds a Sigstore bundle over the manifest, from a key you hold or a keyless CI identity, and `verify` checks it against a key or an identity you trust ([signing.md](signing.md)). `serve-mcp` refuses a snapshot that does not verify, and with a `--key` or an identity to trust (or `--require-signature`) one that is not signed by whom you expect, an unsigned one included.
 
 Releases are built by a workflow from a tag: the checksums file is signed with cosign keyless and each archive has a build-provenance attestation ([install.md](install.md#check-the-download)). Every GitHub Action is pinned by full commit SHA, workflows run with the least permissions that work, and the repository runs CodeQL, `govulncheck` and OpenSSF Scorecard.
 
@@ -53,7 +53,7 @@ Releases are built by a workflow from a tag: the checksums file is signed with c
 - **Tags are the one value kept**, from states and inventories, after the detectors. With `--hash-ids`, a tag value that holds an identifier of its node (the ID, the name, the ARN or the cloud path) is hashed, and a tag whose key holds one is dropped. A tag that is sensitive and does not look it gets through; `--drop-tags` removes them all.
 - **A hashed snapshot still shows the shape of the estate**: types, accounts, regions, counts and times. Two snapshots hashed with one key can be compared; keep the key.
 - **A snapshot is as true as what it was read from.** `limits` says what is missing and the age of the oldest source; it cannot say what was never read.
-- **The files are checked, then opened.** A process that can write into the snapshot folder between `verify` and the engine loading the tables could change one. Serve or audit a snapshot from a folder only you can write to ([signing.md](signing.md#what-is-read-once)).
+- **The files are read once.** The query engine loads the bytes that were hashed, from a private copy the process makes, not the snapshot folder a second time, so a change made to the folder after `verify` is not served ([signing.md](signing.md#what-is-read-once)).
 - **The engine is C++.** `govulncheck` cannot see DuckDB; read its security advisories when you bump the pinned version.
 - **The identity that reads state can read its secrets.** The tool drops them in memory, but the role you give it can see them. Scope it to the state it needs ([permissions.md](permissions.md)).
 - **Not covered:** vulnerabilities in Terraform, OpenTofu, DuckDB or the clouds themselves, and what someone does with an answer.

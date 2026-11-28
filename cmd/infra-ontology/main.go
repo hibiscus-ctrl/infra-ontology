@@ -32,13 +32,16 @@ commands:
   snapshot verify [--json] <dir>      check a snapshot folder against its manifest, and its
                                       signature if it has one (--key PUBKEY, or --certificate-identity
                                       and --certificate-oidc-issuer; --trusted-root FILE,
-                                      --require-signature)
+                                      --require-signature). A key or identity given means
+                                      the snapshot must be signed by it: unsigned fails (exit 4)
   snapshot sign (--key FILE | --keyless) [--force] <dir>
                                       sign the manifest: write manifest.sig.json, a Sigstore bundle
   query <dir> --sql TEXT              read-only SQL over a snapshot, with row caps and a
   query <dir> --stored NAME [--param k=v ...]
                                       citation of the snapshot, query and result
-                                      (--json, --answer-out FILE, --list)
+                                      (--json, --answer-out FILE, --list). A snapshot that does not
+                                      verify exits 4, as verify does; the signature flags of verify
+                                      apply (a --key or identity given requires a signature)
   verify --answer FILE [--snapshot <dir>]
                                       re-run a cited answer against its snapshot
   diff [--json] <a> [<b>]             what changed from snapshot a to snapshot b

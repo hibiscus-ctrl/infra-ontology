@@ -71,8 +71,9 @@ func writeJSON(w io.Writer, v any) {
 }
 
 // runVerify is `snapshot verify`: the manifest, the tables and the rows, and
-// the signature when there is one. A signature that is not valid fails it; no
-// signature does not, unless --require-signature says one must verify.
+// the signature when there is one. A signature that is not valid fails it. No
+// signature fails it only when one is required: --require-signature, or a
+// --key or --certificate-identity to trust, which the signature must satisfy.
 func runVerify(args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("snapshot verify", stderr)
 	asJSON := fs.Bool("json", false, "print the result as JSON")
@@ -89,11 +90,8 @@ func runVerify(args []string, stdout, stderr io.Writer) int {
 	// The signature is checked over the manifest bytes the verification read.
 	res, manifest := snapshot.VerifyWithManifest(dirs[0])
 	sig := signing.CheckBytes(dirs[0], manifest, v)
-	switch {
-	case sig.State == signing.Invalid:
-		res.Problems = append(res.Problems, signing.File+": "+sig.Problem)
-	case *vf.require && sig.State != signing.Verified:
-		res.Problems = append(res.Problems, "no signature: --require-signature wants one that verifies")
+	if problem := signatureProblem(sig, vf.required()); problem != "" {
+		res.Problems = append(res.Problems, problem)
 	}
 	switch {
 	case *asJSON:

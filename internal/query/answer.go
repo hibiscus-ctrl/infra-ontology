@@ -35,12 +35,32 @@ func Run(ctx context.Context, eng Engine, dir string, o Options, req Request) (*
 	if err != nil {
 		return nil, err
 	}
-	sess, err := eng.Open(ctx, dir, o)
+	return RunLoaded(ctx, eng, loaded, o, req)
+}
+
+// RunLoaded is Run over a snapshot already loaded: a caller that checks more
+// than the hashes (a signature) loads it, checks, and asks.
+func RunLoaded(ctx context.Context, eng Engine, loaded *snapshot.Loaded, o Options, req Request) (*Output, error) {
+	sess, err := OpenVerified(ctx, eng, loaded, o)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = sess.Close() }()
 	return Ask(ctx, sess, loaded.Manifest, req)
+}
+
+// OpenVerified opens a session over exactly the bytes Load verified: they are
+// written to a private folder, the engine reads that folder, and it is deleted
+// before this returns (both session modes have copied the tables by then). The
+// snapshot's own folder is not read again, so a file swapped in after the
+// hashing is never served and the citation's manifest is the one served.
+func OpenVerified(ctx context.Context, eng Engine, l *snapshot.Loaded, o Options) (Session, error) {
+	dir, remove, err := l.Materialize()
+	if err != nil {
+		return nil, err
+	}
+	defer remove()
+	return eng.Open(ctx, dir, o)
 }
 
 // Ask runs the question in an open session over the snapshot whose manifest is

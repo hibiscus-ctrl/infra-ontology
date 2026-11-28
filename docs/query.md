@@ -5,12 +5,15 @@
 ```sh
 infra-ontology query <snapshot-dir> --sql "SELECT kind, count(*) AS n FROM nodes GROUP BY kind ORDER BY kind"
 infra-ontology query <snapshot-dir> --stored blast --param node=module.network --param depth=3
+infra-ontology query <snapshot-dir> --key cosign.pub --sql "..."   # only if the snapshot is signed by that key
 infra-ontology query --list                            # the stored queries and their parameters
 infra-ontology query <snapshot-dir> --sql "..." --json --answer-out answer.json
 infra-ontology verify --answer answer.json [--snapshot <snapshot-dir>]
 ```
 
-The command reads local files only. It first verifies the snapshot (the same check as `snapshot verify`), so an answer never cites a snapshot whose files do not match its manifest.
+The command reads local files only. It first verifies the snapshot (the same check as `snapshot verify`), so an answer never cites a snapshot whose files do not match its manifest. A snapshot that does not verify exits 4, the code of `verify`, `diff` and `serve-mcp` (a refused query exits 1, a bad flag 2), and nothing is printed.
+
+`query` takes the signature flags of `verify` and `serve-mcp` (`--key`, `--certificate-identity` with `--certificate-oidc-issuer` or the regexp forms, `--trusted-root`, `--require-signature`), with the same meaning ([signing.md](signing.md#verifying)): a key or an identity to trust requires a snapshot with a signature that verifies, and an unsigned or wrongly signed one exits 4 before any query runs. With none of them the signature is not checked, though a signature file that is not a Sigstore bundle still fails.
 
 ## What a query may read
 
@@ -21,7 +24,9 @@ Two table macros walk the edges. An edge runs from a thing to what it needs, so:
 - `blast(node_id, depth)` is what depends on a node, directly or through others: what breaks or changes if it does. It follows edges backwards.
 - `cone(node_id, depth)` is what a node needs: its dependency cone. It follows edges forwards.
 
-Both return `(node_id, depth)`, the fewest hops to each node, and stop at the given depth or 50, whichever is less. They are written as a recursive query over `UNION`, so a cycle or two paths to one node cost nothing extra. `unnest` may also be used as a table function, for the tags.
+Both return `(node_id, depth, edge_kind, confidence)`: the fewest hops to each node, the kind of the edge that reached it (null for the start) and the weakest confidence along the path (when several paths are as short, the strongest of them). They stop at the given depth or 50, whichever is less.
+
+They follow dependency edges only (`depends_on`, `contained_in`, `defined_in`, `reads_state_of`). `can_assume`, `can_read` and `can_write` are access, not dependency: a principal that can assume a role does not break if the role changes, and an anonymous or cross-account principal is not a dependent. Pass `true` as a third argument (`blast(id, depth, true)`), or `--param include_access=1` to the stored query, to walk those edges too; then `edge_kind` and `confidence` say which rows are access and how far to trust them. They are written as a recursive query over `UNION`, so a cycle or two paths to one node cost nothing extra. `unnest` may also be used as a table function, for the tags.
 
 ## The dialect
 
@@ -81,13 +86,14 @@ Named, versioned SQL files in `queries/`, compiled into the binary. The header s
 
 ```sql
 -- name: blast
--- version: 1
+-- version: 2
 -- description: What depends on a node ...
 -- param: node string required A node id, a Terraform address, an ARN or path, or a native id
 -- param: depth int[0..50] 5 How many hops to follow
+-- param: include_access int[0..1] 0 1 to also follow can_assume, can_read and can_write edges
 ```
 
-A parameter is `string` or `int` (optionally `int[lo..hi]`), with a default, `required`, or `-` for an optional filter that defaults to empty. A string is written into the query as a quoted literal, an integer as a checked number; a value cannot add SQL. The rendered text goes through the same checker as any other. The stored queries are `blast` and `cone` (a node by id, Terraform address, ARN or path, or native id, and a depth), `unmanaged` (resources in the inventory that no state holds), `summary` (nodes by kind and managed status) and `inventory` (the nodes in a fixed order, filtered by type, account, environment, module and address prefix, with an offset for paging: what the MCP `inventory` tool runs). `query --list` prints them with their parameters.
+A parameter is `string` or `int` (optionally `int[lo..hi]`), with a default, `required`, or `-` for an optional filter that defaults to empty. A string is written into the query as a quoted literal, an integer as a checked number; a value cannot add SQL. The rendered text goes through the same checker as any other. The stored queries are `blast` and `cone` (a node by id, Terraform address, ARN or path, or native id, a depth, and `include_access`: see [what the macros walk](#what-a-query-may-read)), `unmanaged` (resources in the inventory that no state holds), `summary` (nodes by kind and managed status) and `inventory` (the nodes in a fixed order, filtered by type, account, environment, module and address prefix, with an offset for paging: what the MCP `inventory` tool runs). `query --list` prints them with their parameters.
 
 ## The citation
 
@@ -97,7 +103,7 @@ Every answer is printed with, and `--json` returns, a record that matches [`sche
 {
   "query": "SELECT ...",
   "query_hash": "sha256:...",
-  "stored_query": "blast", "stored_query_version": 1, "stored_query_hash": "sha256:...",
+  "stored_query": "blast", "stored_query_version": 2, "stored_query_hash": "sha256:...",
   "parameters": {"node": "module.network", "depth": "3"},
   "snapshot_id": "99688f074a1d268e...",
   "dialect": "infra-ontology/sql/v1",

@@ -11,7 +11,7 @@ The server opens no port, reads no cloud or backend, takes no credentials and wr
 
 ## Start-up
 
-1. **Verify.** The snapshot is checked against its manifest, as `snapshot verify` does. A snapshot that does not verify is not served: the command prints why and exits 4. If the snapshot is signed, the signature is read too (see [signing](signing.md)): given `--key`, or `--certificate-identity` and `--certificate-oidc-issuer`, the server checks it and refuses to start on a signature that does not check; `--require-signature` also refuses a snapshot with no signature that verified. A signature file that is not a Sigstore bundle is refused too.
+1. **Verify.** The snapshot is checked against its manifest, as `snapshot verify` does. A snapshot that does not verify is not served: the command prints why and exits 4. If the snapshot is signed, the signature is read too (see [signing](signing.md)): given `--key`, or `--certificate-identity` and `--certificate-oidc-issuer`, the server checks it and refuses to start on a signature that does not check, and on a snapshot with no signature at all: a key or an identity to trust requires a signature that verifies. `--require-signature` says the same without naming one, and is a usage error alone. A signature file that is not a Sigstore bundle is refused too.
 2. **Open one locked session.** The tables are loaded into a private database file that is attached read-only, then the file is deleted and the session is locked, as [the query page](query.md#what-the-session-guarantees) describes. The engine itself refuses every write, and no file can be read, no extension loaded and no setting changed. One session serves every call.
 3. **Serve** until the client closes the connection.
 
@@ -26,7 +26,7 @@ All four are annotated read-only, idempotent, not destructive and closed-world. 
 | Tool | Inputs | Result |
 | --- | --- | --- |
 | `inventory` | `type` (Terraform or inventory type), `account`, `environment`, `module` (that path and the modules in it), `address_prefix`, `limit` (1 to 1000, default 100), `offset` | A page of nodes in a fixed order, and `next_offset` when more follow. It runs the stored query `inventory` |
-| `blast_radius` | `target` (a node id, Terraform address, ARN or path, or cloud id), `max_depth` (1 to 10, default 5), `limit` (1 to 1000, default 200) | `status`: `resolved`, `ambiguous` or `not_found`; the `targets`; the `dependents` with their depth; counts by type and by account; the depth reached. It runs the stored query `blast`. A target that matches several nodes (the same address in two accounts) returns them as candidates with no dependents: call again with a node id |
+| `blast_radius` | `target` (a node id, Terraform address, ARN or path, or cloud id), `max_depth` (1 to 10, default 5), `limit` (1 to 1000, default 200), `include_access` (default false) | `status`: `resolved`, `ambiguous` or `not_found`; the `targets`; the `dependents` with their depth, the `edge_kind` that reached each and its `confidence` (the weakest along the path); counts by type and by account; the depth reached. It follows dependency edges (`depends_on`, `contained_in`, `defined_in`, `reads_state_of`) only: `include_access` also follows `can_assume`, `can_read` and `can_write`, which say who may reach a node, are mostly inferred, and do not mean it breaks if the target does. It runs the stored query `blast`. A target that matches several nodes (the same address in two accounts) returns them as candidates with no dependents: call again with a node id |
 | `query` | `sql`, or `stored` and `params`; `limit` (1 to 1000, default 100) | The rows of one read-only query, under the same dialect check and caps as `infra-ontology query` |
 | `snapshot_info` | none | The snapshot's id, label, parent, age, status, signature status, tables, sources, coverage, failed sources, redaction and limits; the stored queries and their parameters; the caps and the tools that are on |
 
@@ -55,11 +55,12 @@ Each tool call appends one JSON line to the file given by `--audit-log`, or to s
 | `args_hash` | SHA-256 of the call's arguments as JSON. The arguments themselves are not logged |
 | `query_hash` | The hash of the canonical query that ran, the same as `answer.query_hash`. Empty when nothing ran |
 | `stored_query` | The stored query that ran, if one did |
+| `query_text`, `query_text_truncated` | Only for a `query` call with `sql` that was `refused` or `invalid`: the SQL as sent, so that it can be reviewed. It is cut at 1,024 bytes (`query_text_truncated` is then true), control characters and line breaks become spaces and runs of white space one, so a line of the log stays a line |
 | `row_count`, `truncated` | What the answer says |
 | `outcome` | `ok`, `refused` (the dialect or a cap said no), `invalid` (a bad argument), `timeout`, `cancelled` or `error` |
 | `duration_ms` | How long the call took |
 
-The log never holds a result row, a name, an address or a tag, and not the text of a query. A call whose line cannot be written (a full disk, a closed file) is refused rather than answered unrecorded.
+The log never holds a result row, a name, an address or a tag, and not the text of a query that ran: those are covered by `args_hash` and `query_hash`. The one exception is a refused or an invalid `query` call, which has no canonical query to hash, so its SQL is kept (bounded, on one line) for review. It is what the agent sent, so it can name things the agent had read; the log is mode 0600 for that reason. A call whose line cannot be written (a full disk, a closed file) is refused rather than answered unrecorded.
 
 ## Configuring a client
 

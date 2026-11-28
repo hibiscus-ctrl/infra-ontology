@@ -74,15 +74,18 @@ A third step checks that the same bundle does not verify against another workflo
 
 | Snapshot | Result |
 | --- | --- |
-| No `manifest.sig.json` | Reported as `unsigned`. Verification passes. |
+| No `manifest.sig.json`, and no `--key` or identity given | Reported as `unsigned`. Verification passes. |
+| No `manifest.sig.json`, and a `--key` or an identity given | `FAILED`, exit 4: what you trust did not sign it. |
 | A signature, and no `--key` or identity given | Reported as `signed (unverified)`. It reads as a Sigstore bundle; it was not checked. Passes. |
 | A signature, and it checks against what you gave | Reported as `verified`, with the key's SHA-256 or the certificate's identity and issuer. Passes. |
 | A signature that does not check (wrong key or identity, a changed manifest, an edited bundle), or a file that is not a bundle | `FAILED`, exit 4. |
 | `--require-signature`, and no signature that verified | `FAILED`, exit 4. It needs `--key` or an identity to check with, or it is a usage error (exit 2). |
 
+**What you give is what you trust.** A `--key` or an identity (`--certificate-identity` or its regexp form, with an issuer) is a statement that this snapshot must be signed by it, so an unsigned snapshot fails on its own, with or without `--require-signature`. The flag is kept, and it adds nothing a key or an identity does not already say; it is the one that turns a missing signature into a failure when you have nothing to check with, and then the command refuses as a usage error rather than pass. Without any of these flags nothing is checked, and an unsigned snapshot passes. The same holds for `query` and `serve-mcp`; `verify --answer` checks a cited answer, not a signature, and refuses these flags.
+
 **With a key.** `--key PUBKEY` takes the PEM public key (`cosign.pub`). It works offline.
 
-**Keyless.** `--certificate-identity` (or `--certificate-identity-regexp`) and `--certificate-oidc-issuer` (or `--certificate-oidc-issuer-regexp`) are required together, with the rules of `cosign verify-blob`: the certificate's subject alternative name and its OIDC issuer must match, and an exact value must be the whole value. The certificate must chain to the trusted root, carry a signed certificate timestamp, have a Rekor entry, and have been valid at the time it was logged. The trusted root is fetched with TUF; `--trusted-root FILE` takes a `trusted_root.json` instead (for example from `cosign trusted-root create`, or the public-good root saved from a connected machine), so the check runs offline.
+**Keyless.** `--certificate-identity` (or `--certificate-identity-regexp`) and `--certificate-oidc-issuer` (or `--certificate-oidc-issuer-regexp`) are required together, with the rules of `cosign verify-blob`: the certificate's subject alternative name and its OIDC issuer must match, and an exact value must be the whole value. So must a regular expression: `--certificate-identity-regexp` and `--certificate-oidc-issuer-regexp` are anchored as `^(?:EXPRESSION)$` before they are matched (Sigstore's own matcher finds an expression anywhere in the value, so `github.com/org/repo` would match `https://evil/x?github.com/org/repo`). Write the whole identity, with `.*` where a part may vary: `https://github\.com/org/repo/\.github/workflows/.*@refs/heads/main`. An expression that matched part of a value before no longer does. The certificate must chain to the trusted root, carry a signed certificate timestamp, have a Rekor entry, and have been valid at the time it was logged. The trusted root is fetched with TUF; `--trusted-root FILE` takes a `trusted_root.json` instead (for example from `cosign trusted-root create`, or the public-good root saved from a connected machine), so the check runs offline.
 
 A key signature does not pass a keyless check and the reverse: `--key` requires a bundle signed by a key and an identity requires one signed by a certificate.
 
@@ -90,11 +93,11 @@ A key signature does not pass a keyless check and the reverse: `--key` requires 
 
 ## In the MCP server
 
-`serve-mcp` takes the same flags (`--key`, `--certificate-identity`, `--certificate-oidc-issuer`, `--trusted-root`, `--require-signature`). The `snapshot_info` tool and the server's instructions report the signature status: `unsigned`, `signed_unverified`, or `verified` with its signer when the server was started with something to check it with. A signature that does not check, or a signature file that is not a bundle, stops the server from starting (exit 4), as a snapshot that does not verify does; so does `--require-signature` on a snapshot with no verified signature. The status is read once, at start-up, with the snapshot.
+`serve-mcp` takes the same flags (`--key`, `--certificate-identity`, `--certificate-oidc-issuer`, `--trusted-root`, `--require-signature`). The `snapshot_info` tool and the server's instructions report the signature status: `unsigned`, `signed_unverified`, or `verified` with its signer when the server was started with something to check it with. A signature that does not check, or a signature file that is not a bundle, stops the server from starting (exit 4), as a snapshot that does not verify does; so does a snapshot with no verified signature when a `--key` or an identity was given, or `--require-signature`. The status is read once, at start-up, with the snapshot.
 
 ## What is read once
 
-`verify`, `snapshot sign` and `serve-mcp` read `manifest.json` once: the signature is checked, or made, over the very bytes whose id and table hashes were verified, so the manifest cannot be swapped between the two checks. One gap remains, and it is not specific to signatures: the files are checked and the engine opens them later. A process that can write into the snapshot folder between `serve-mcp` verifying the tables and the engine loading them could change a table after its hash was checked. Keep a snapshot you serve or audit in a folder only you can write to.
+`verify`, `snapshot sign`, `query` and `serve-mcp` read each file once: the signature is checked, or made, over the very bytes whose id and table hashes were verified, so the manifest cannot be swapped between the two checks. The query engine does not read the snapshot folder again either: the bytes that were hashed are written to a private folder (made by the process, readable by its user alone), the engine loads its tables from there, and the folder is deleted when the session has them. A file swapped into the snapshot folder after the hashing is never served, and the manifest an answer cites is the manifest that was served.
 
 ## What a signature does not say
 

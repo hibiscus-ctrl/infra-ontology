@@ -8,11 +8,61 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// The limits of reading a snapshot. A snapshot is read whole, so a file or a
+// table that is larger than these is refused before it is read or decoded,
+// with an error that says which limit. They are generous: 512 MiB is far more
+// than any estate this tool writes, and five million rows of a table are in
+// the order of a few gigabytes once decoded. They are variables only so that
+// the tests can lower them; there is no flag or setting for them.
+var (
+	// maxTableBytes is the most bytes of one Parquet file.
+	maxTableBytes int64 = 512 << 20
+	// maxTableRows is the most rows of one table.
+	maxTableRows = 5_000_000
+	// maxManifestBytes is the most bytes of manifest.json.
+	maxManifestBytes int64 = 16 << 20
+)
+
+// readRegular reads a file that is a regular file of at most limit bytes. A
+// symbolic link, a directory, a device or a pipe is refused rather than
+// followed or waited on, and a file larger than limit is refused before it is
+// read; the size is also enforced while reading, in case it grows.
+func readRegular(path string, limit int64) ([]byte, error) {
+	st, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !st.Mode().IsRegular() {
+		return nil, errors.New("not a regular file (a link, directory or device is not part of a snapshot)")
+	}
+	if st.Size() > limit {
+		return nil, fmt.Errorf("%d bytes, over the limit of %d", st.Size(), limit)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	// What was opened is what was looked at, not a file swapped in between.
+	if opened, err := f.Stat(); err != nil || !os.SameFile(st, opened) {
+		return nil, errors.New("not a regular file (it changed while it was opened)")
+	}
+	b, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > limit {
+		return nil, fmt.Errorf("more than the limit of %d bytes", limit)
+	}
+	return b, nil
+}
 
 // Loaded is a snapshot read from a folder after it verified.
 type Loaded struct {
@@ -23,6 +73,35 @@ type Loaded struct {
 	// parsed. A signature over the manifest is checked against these, not
 	// against a second read of the file, which could have changed since.
 	ManifestRaw []byte
+	// files are the bytes of each table file that were hashed, by file name.
+	files map[string][]byte
+}
+
+// Materialize writes the bytes that verified (the manifest and the table
+// files) to a new private folder, and returns it with a function that deletes
+// it. Open a snapshot from this folder, not from Dir, so that what is served
+// is what was hashed: Dir can be changed between the hashing and a second
+// read, this folder is made by this process, readable by its user alone.
+func (l *Loaded) Materialize() (dir string, remove func(), err error) {
+	dir, err = os.MkdirTemp("", "infra-ontology-snapshot-")
+	if err != nil {
+		return "", nil, err
+	}
+	remove = func() { _ = os.RemoveAll(dir) }
+	write := func(name string, b []byte) error {
+		return os.WriteFile(filepath.Join(dir, name), b, 0o600)
+	}
+	if err := write(ManifestFile, l.ManifestRaw); err != nil {
+		remove()
+		return "", nil, err
+	}
+	for name, b := range l.files {
+		if err := write(name, b); err != nil {
+			remove()
+			return "", nil, err
+		}
+	}
+	return dir, remove, nil
 }
 
 // VerifyResult is what Verify found. It does not stop at the first problem.
@@ -74,7 +153,7 @@ func load(dir string) (*Loaded, VerifyResult, []byte) {
 	res := VerifyResult{Dir: dir, Problems: []string{}}
 	fail := func(format string, args ...any) { res.Problems = append(res.Problems, fmt.Sprintf(format, args...)) }
 
-	raw, err := os.ReadFile(filepath.Join(dir, ManifestFile))
+	raw, err := readRegular(filepath.Join(dir, ManifestFile), maxManifestBytes)
 	if err != nil {
 		fail("%s: %v", ManifestFile, reason(err))
 		return nil, res, raw
@@ -115,7 +194,7 @@ func load(dir string) (*Loaded, VerifyResult, []byte) {
 			continue
 		}
 		listed[t.Name] = true
-		b, err := os.ReadFile(filepath.Join(dir, t.File))
+		b, err := readRegular(filepath.Join(dir, t.File), maxTableBytes)
 		if err != nil {
 			fail("%s: %v", t.File, reason(err))
 			continue
@@ -182,7 +261,11 @@ func load(dir string) (*Loaded, VerifyResult, []byte) {
 	if !res.OK() {
 		return nil, res, raw
 	}
-	return &Loaded{Dir: dir, Manifest: m, Tables: t, ManifestRaw: raw}, res, raw
+	files := map[string][]byte{}
+	for _, info := range m.Tables {
+		files[info.File] = data[info.Name]
+	}
+	return &Loaded{Dir: dir, Manifest: m, Tables: t, ManifestRaw: raw, files: files}, res, raw
 }
 
 func schemaOf(table string) string {
@@ -199,7 +282,7 @@ func schemaOf(table string) string {
 // dir's parent_id. It returns "" and no error if dir has no parent, and an
 // error if the parent is named but not there.
 func FindParent(dir string) (string, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, ManifestFile))
+	raw, err := readRegular(filepath.Join(dir, ManifestFile), maxManifestBytes)
 	if err != nil {
 		return "", err
 	}
@@ -227,7 +310,7 @@ func FindParent(dir string) (string, error) {
 			continue
 		}
 		cand := filepath.Join(siblings, e.Name())
-		b, err := os.ReadFile(filepath.Join(cand, ManifestFile))
+		b, err := readRegular(filepath.Join(cand, ManifestFile), maxManifestBytes)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		} else if err != nil {

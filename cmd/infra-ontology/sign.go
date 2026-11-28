@@ -21,13 +21,13 @@ type verifyFlags struct {
 
 func addVerifyFlags(fs *flag.FlagSet) verifyFlags {
 	return verifyFlags{
-		key:         fs.String("key", "", "check the signature with this PEM public key (offline)"),
-		identity:    fs.String("certificate-identity", "", "check a keyless signature: the certificate's identity, an email address or a workflow URL (with --certificate-oidc-issuer)"),
-		identityRe:  fs.String("certificate-identity-regexp", "", "the certificate's identity as a regular expression"),
+		key:         fs.String("key", "", "trust this PEM public key: the snapshot must carry a signature that checks with it (offline)"),
+		identity:    fs.String("certificate-identity", "", "trust a keyless signature by this certificate identity, an email address or a workflow URL (with --certificate-oidc-issuer); the snapshot must carry one"),
+		identityRe:  fs.String("certificate-identity-regexp", "", "the certificate's identity as a regular expression that must match all of it (anchored as ^(?:...)$)"),
 		issuer:      fs.String("certificate-oidc-issuer", "", "the OIDC issuer of the certificate, for example https://token.actions.githubusercontent.com"),
-		issuerRe:    fs.String("certificate-oidc-issuer-regexp", "", "the OIDC issuer as a regular expression"),
+		issuerRe:    fs.String("certificate-oidc-issuer-regexp", "", "the OIDC issuer as a regular expression that must match all of it (anchored as ^(?:...)$)"),
 		trustedRoot: fs.String("trusted-root", "", "a Sigstore trusted_root.json, to check a keyless signature offline (default: the public-good root, fetched with TUF)"),
-		require:     fs.Bool("require-signature", false, "fail if the snapshot has no signature that verified"),
+		require:     fs.Bool("require-signature", false, "fail if the snapshot has no signature that verified (implied by --key, or --certificate-identity with --certificate-oidc-issuer: what you trust must have signed it)"),
 	}
 }
 
@@ -36,6 +36,13 @@ func (f verifyFlags) verifier() signing.Verifier {
 		KeyFile: *f.key, Identity: *f.identity, IdentityRegexp: *f.identityRe,
 		Issuer: *f.issuer, IssuerRegexp: *f.issuerRe, TrustedRoot: *f.trustedRoot,
 	}
+}
+
+// required reports whether a signature that verifies is a must: it was asked
+// for with --require-signature, or something to trust was given. A key or an
+// identity that an unsigned snapshot passes would be no check at all.
+func (f verifyFlags) required() bool {
+	return *f.require || f.verifier().Configured()
 }
 
 // set reports whether any of the flags was given.
@@ -55,6 +62,19 @@ func (f verifyFlags) check() (signing.Verifier, error) {
 		return v, fmt.Errorf("--require-signature needs --key, or --certificate-identity and --certificate-oidc-issuer, to check the signature with")
 	}
 	return v, nil
+}
+
+// signatureProblem says what is wrong with a signature, or "" if nothing is: a
+// signature that is no bundle or does not check, or none that verifies when one
+// is required.
+func signatureProblem(sig signing.Status, required bool) string {
+	switch {
+	case sig.State == signing.Invalid:
+		return signing.File + ": " + sig.Problem
+	case required && sig.State != signing.Verified:
+		return "no signature that verifies: one is required (--require-signature, or a --key or --certificate-identity to trust)"
+	}
+	return ""
 }
 
 // runSign is `snapshot sign`: write manifest.sig.json, a Sigstore bundle over

@@ -171,16 +171,37 @@ func (s *session) load(ctx context.Context, dir string, m snapshot.Manifest, o O
 // macroSQL defines a table macro that walks the edges from a node: from
 // follows an edge from one column to the other, so blast reads who depends on
 // the node (an edge runs from the dependent to what it needs) and cone reads
-// what the node needs. UNION, not UNION ALL, drops a repeated (node, depth)
-// pair, which keeps a cycle cheap, and the depth is capped at 50 whatever is
-// asked.
+// what the node needs. UNION, not UNION ALL, drops a repeated row, which keeps
+// a cycle cheap, and the depth is capped at 50 whatever is asked.
+//
+// The macro has two forms: (start, depth) follows dependency edges only, and
+// (start, depth, include_access) also follows can_assume, can_read and
+// can_write when the third is true. It returns, for each node, the fewest hops
+// to it (depth), the kind of the edge that reached it (edge_kind; null for the
+// start) and the weakest confidence along the path (confidence), taking the
+// strongest of the paths of that length.
 func macroSQL(name, edges, join, next string) string {
-	return fmt.Sprintf(`CREATE MACRO %s(start_id, max_depth) AS TABLE
-WITH RECURSIVE r(node_id, depth) AS (
-  SELECT start_id::VARCHAR, 0
+	kinds := "'" + strings.Join(AccessEdgeKinds, "', '") + "'"
+	form := func(params, allowed string) string {
+		return fmt.Sprintf(`(%s) AS TABLE (
+WITH RECURSIVE r(node_id, depth, edge_kind, weak) AS (
+  SELECT start_id::VARCHAR, 0, NULL::VARCHAR, 0
   UNION
-  SELECT %s, r.depth + 1 FROM r JOIN %s e ON %s = r.node_id WHERE r.depth < least(max_depth, 50)
-) SELECT node_id, min(depth) AS depth FROM r GROUP BY node_id`, name, next, edges, join)
+  SELECT %s, r.depth + 1, e.kind,
+    greatest(r.weak, CASE e.confidence WHEN 'observed' THEN 1 WHEN 'computed' THEN 2 ELSE 3 END)
+  FROM r JOIN %s e ON %s = r.node_id WHERE r.depth < least(max_depth, 50) AND %s
+), nearest AS (
+  SELECT node_id, min(depth) AS depth FROM r GROUP BY node_id
+), strongest AS (
+  SELECT r.node_id, r.depth, min(r.weak) AS weak FROM r JOIN nearest USING (node_id, depth) GROUP BY r.node_id, r.depth
+)
+SELECT s.node_id, s.depth, min(r.edge_kind) AS edge_kind,
+  CASE s.weak WHEN 1 THEN 'observed' WHEN 2 THEN 'computed' WHEN 3 THEN 'inferred' END AS confidence
+FROM strongest s JOIN r ON r.node_id = s.node_id AND r.depth = s.depth AND r.weak = s.weak
+GROUP BY s.node_id, s.depth, s.weak)`, params, next, edges, join, allowed)
+	}
+	return "CREATE MACRO " + name + form("start_id, max_depth", "e.kind NOT IN ("+kinds+")") + ",\n" +
+		form("start_id, max_depth, include_access", "(include_access OR e.kind NOT IN ("+kinds+"))")
 }
 
 func (s *session) Close() error {

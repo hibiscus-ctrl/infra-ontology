@@ -163,6 +163,11 @@ func readParquet[T any](data []byte, schema string) ([]T, error) {
 	if got, ok := f.Lookup(schemaKey); !ok || got != schema {
 		return nil, fmt.Errorf("file declares schema %q, want %q", got, schema)
 	}
+	// The footer says how many rows follow: refuse a table past the limit
+	// before decoding any of it.
+	if n := f.NumRows(); n > int64(maxTableRows) {
+		return nil, fmt.Errorf("%d rows, over the limit of %d", n, maxTableRows)
+	}
 	r := parquet.NewGenericReader[T](f)
 	defer r.Close()
 	// The row count comes from the file, which may not be ours yet: let append
@@ -172,6 +177,9 @@ func readParquet[T any](data []byte, schema string) ([]T, error) {
 		buf := make([]T, 1024) // fresh each time: the reader may reuse a row's slices
 		n, err := r.Read(buf)
 		rows = append(rows, buf[:n]...)
+		if len(rows) > maxTableRows { // the footer was not the whole truth
+			return nil, fmt.Errorf("more than the limit of %d rows", maxTableRows)
+		}
 		if errors.Is(err, io.EOF) {
 			return rows, nil
 		}
