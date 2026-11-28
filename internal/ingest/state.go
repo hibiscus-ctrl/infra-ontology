@@ -218,7 +218,7 @@ type builder struct {
 	joined       map[string]bool
 	stateManaged []string
 
-	credentialIDs, tagsDropped, claimedManaged int
+	credentialIDs, tagsDropped, claimedManaged, mislabelled int
 
 	// key hashes the snapshot, if not nil (see Options.HashKey). raw holds the
 	// ID and ARN a state gave each resource node, as written, to be matched to

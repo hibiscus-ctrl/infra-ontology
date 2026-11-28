@@ -123,6 +123,13 @@ func (b *builder) openInventories(reads []InventoryRead) []*invResource {
 			continue
 		}
 		inv := r.Inv
+		if inv.IDsHashed && !hashShaped(inv) {
+			// The flag is a claim: a document that says its IDs are hashed and
+			// holds a value that is not a hash is read as one that hashed
+			// nothing, so that its values are hashed here, with the key.
+			inv.IDsHashed = false
+			b.mislabelled++
+		}
 		src.DocumentSHA256, src.Collector, src.CollectorVersion = inv.Digest, firstOf(clearCredential(inv.Tool), src.Collector), firstOf(clearCredential(inv.ToolVersion), src.CollectorVersion)
 		if !inv.GeneratedAt.IsZero() {
 			src.CollectedAt = inv.GeneratedAt.UTC().Format(time.RFC3339)
@@ -149,6 +156,20 @@ func (b *builder) openInventories(reads []InventoryRead) []*invResource {
 		out = append(out, merged[k])
 	}
 	return out
+}
+
+// hashShaped says every ID, name, address, module and root of an inventory
+// that says it hashed them has the shape of a hash: 64 hexadecimal digits, or
+// is empty.
+func hashShaped(inv Inventory) bool {
+	for _, r := range inv.Resources {
+		for _, v := range []string{r.ID, r.CloudID, r.Name, r.Address, r.Module, r.Root} {
+			if v != "" && !hashedValue(v) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // mergeResource normalises one resource of an inventory into merged: it is
@@ -692,6 +713,13 @@ func (b *builder) inventoryLimits() []string {
 	}
 	if b.tagsDropped > 0 {
 		s = append(s, fmt.Sprintf("%d tags look like secrets, or were dropped by request, and are not kept.", b.tagsDropped))
+	}
+	if b.mislabelled > 0 {
+		what := "so they are read as not hashed"
+		if b.key != nil {
+			what += ", and their values are hashed here with the key"
+		}
+		s = append(s, fmt.Sprintf("%d inventories say their IDs are hashed but hold values that are not hashes, %s.", b.mislabelled, what))
 	}
 	switch n := b.hashedInventories(); {
 	case n > 0 && b.key == nil:

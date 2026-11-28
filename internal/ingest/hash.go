@@ -65,9 +65,10 @@ func (b *builder) markHashed(id string, fields ...string) {
 }
 
 // hashField hashes the value of a column of a node, unless it is one an
-// inventory hashed.
+// inventory hashed. The mark is a claim: a value is kept as it is only if it
+// has the shape of a hash (see hashedValue), and any other is hashed here.
 func (b *builder) hashField(id, field, v string) string {
-	if b.preHashed[id+"\x00"+field] {
+	if b.preHashed[id+"\x00"+field] && hashedValue(v) {
 		return v
 	}
 	return b.h(v)
