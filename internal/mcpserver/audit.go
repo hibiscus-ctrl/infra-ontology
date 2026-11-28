@@ -11,8 +11,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -31,19 +34,53 @@ const (
 
 // AuditEntry is one line of the audit log: what was asked, of which snapshot,
 // and how it ended. It never holds a result row, and it holds the arguments
-// only as a hash.
+// only as a hash, except that a refused or an invalid call also keeps the SQL
+// it sent, bounded and on one line, so that it can be reviewed.
 type AuditEntry struct {
-	Time        string `json:"time"`
-	Tool        string `json:"tool"`
-	Client      string `json:"client,omitempty"`
-	SnapshotID  string `json:"snapshot_id"`
-	ArgsHash    string `json:"args_hash"`
-	QueryHash   string `json:"query_hash,omitempty"`
-	StoredQuery string `json:"stored_query,omitempty"`
-	RowCount    int    `json:"row_count"`
-	Truncated   bool   `json:"truncated"`
-	Outcome     string `json:"outcome"`
-	DurationMS  int64  `json:"duration_ms"`
+	Time       string `json:"time"`
+	Tool       string `json:"tool"`
+	Client     string `json:"client,omitempty"`
+	SnapshotID string `json:"snapshot_id"`
+	ArgsHash   string `json:"args_hash"`
+	QueryHash  string `json:"query_hash,omitempty"`
+	// QueryText is the SQL of a query call that was refused or invalid, which
+	// has no canonical query to hash: at most MaxAuditQueryBytes, on one
+	// line, with control characters turned to spaces. It is what the agent
+	// sent, so it can hold what the agent had read.
+	QueryText          string `json:"query_text,omitempty"`
+	QueryTextTruncated bool   `json:"query_text_truncated,omitempty"`
+	StoredQuery        string `json:"stored_query,omitempty"`
+	RowCount           int    `json:"row_count"`
+	Truncated          bool   `json:"truncated"`
+	Outcome            string `json:"outcome"`
+	DurationMS         int64  `json:"duration_ms"`
+}
+
+// MaxAuditQueryBytes is the most bytes of a refused or invalid query kept in
+// the audit log.
+const MaxAuditQueryBytes = 1024
+
+// auditText makes the text of a query fit on one line of the log: control
+// characters and line separators become spaces, runs of white space become
+// one, invalid UTF-8 is replaced, and the result is cut at MaxAuditQueryBytes
+// on a character boundary. It reports whether it was cut.
+func auditText(s string) (string, bool) {
+	s = strings.ToValidUTF8(s, "\uFFFD")
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r) {
+			return ' '
+		}
+		return r
+	}, s)
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) <= MaxAuditQueryBytes {
+		return s, false
+	}
+	cut := MaxAuditQueryBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut], true
 }
 
 // auditor appends entries to a writer, one JSON line each. A call is written
@@ -120,6 +157,9 @@ func handle[In, Out any](s *server, tool string, logic func(context.Context, In)
 			if p := req.Session.InitializeParams(); p != nil && p.ClientInfo != nil {
 				e.Client = p.ClientInfo.Name
 			}
+		}
+		if qi, ok := any(in).(QueryIn); ok && qi.SQL != "" && (e.Outcome == OutcomeRefused || e.Outcome == OutcomeInvalid) {
+			e.QueryText, e.QueryTextTruncated = auditText(qi.SQL)
 		}
 		if q != nil {
 			e.QueryHash, e.RowCount, e.Truncated = q.Answer.QueryHash, q.Answer.RowCount, q.Answer.Truncated

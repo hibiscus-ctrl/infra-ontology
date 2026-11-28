@@ -55,11 +55,12 @@ Each tool call appends one JSON line to the file given by `--audit-log`, or to s
 | `args_hash` | SHA-256 of the call's arguments as JSON. The arguments themselves are not logged |
 | `query_hash` | The hash of the canonical query that ran, the same as `answer.query_hash`. Empty when nothing ran |
 | `stored_query` | The stored query that ran, if one did |
+| `query_text`, `query_text_truncated` | Only for a `query` call with `sql` that was `refused` or `invalid`: the SQL as sent, so that it can be reviewed. It is cut at 1,024 bytes (`query_text_truncated` is then true), control characters and line breaks become spaces and runs of white space one, so a line of the log stays a line |
 | `row_count`, `truncated` | What the answer says |
 | `outcome` | `ok`, `refused` (the dialect or a cap said no), `invalid` (a bad argument), `timeout`, `cancelled` or `error` |
 | `duration_ms` | How long the call took |
 
-The log never holds a result row, a name, an address or a tag, and not the text of a query. A call whose line cannot be written (a full disk, a closed file) is refused rather than answered unrecorded.
+The log never holds a result row, a name, an address or a tag, and not the text of a query that ran: those are covered by `args_hash` and `query_hash`. The one exception is a refused or an invalid `query` call, which has no canonical query to hash, so its SQL is kept (bounded, on one line) for review. It is what the agent sent, so it can name things the agent had read; the log is mode 0600 for that reason. A call whose line cannot be written (a full disk, a closed file) is refused rather than answered unrecorded.
 
 ## Configuring a client
 

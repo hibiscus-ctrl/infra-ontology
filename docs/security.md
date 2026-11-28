@@ -17,7 +17,7 @@ What infra-ontology protects, from what, and where it stops. The rules are the r
 - **No attribute value and no output value.** State is read in memory, one resource at a time, and only the address, type, provider, module path, dependencies, `id`, `arn` and tags of each instance, the names of its outputs and the places a `terraform_remote_state` reads from are kept. Everything else is dropped as the state is read ([state.md](state.md#what-a-snapshot-keeps)). Tags (labels on Google Cloud) are read from state, and are the one value kept, after the secret detectors.
 - **No credential, ever.** Credentials come from the environment's default chains and are never taken from a flag's value, printed, stored or sent. A hash key (`--hash-ids`) is never written: not to the snapshot, not to the manifest, not to standard output or error.
 - **No secret-shaped identifier.** An `id` or ARN that has, or holds, the format of a credential, or is a URL with a user name, password or query parameter, is left out and counted in the manifest's `limits`; the ids of providers whose ids are free text or generated values (`random_*`, `http`, `external`, `local`, `null`, `time`, `archive`, `tls`) are not kept. Locations lose user names, passwords and unknown query parameters ([state.md](state.md#what-a-snapshot-keeps)).
-- **No query text or row in the audit log.** The MCP audit log holds hashes and counts ([mcp.md](mcp.md#the-audit-log)).
+- **No row, and no text of a query that ran, in the audit log.** The MCP audit log holds hashes and counts. A refused or invalid `query` call also keeps its SQL, cut at 1,024 bytes and on one line, so that what an agent tried can be reviewed ([mcp.md](mcp.md#the-audit-log)).
 
 ## Redaction
 

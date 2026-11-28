@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -429,14 +430,21 @@ func TestAuditLogHoldsHashesNotRows(t *testing.T) {
 	if entries[1].StoredQuery != "inventory" || entries[1].RowCount != 3 || !entries[1].Truncated {
 		t.Errorf("inventory entry %+v", entries[1])
 	}
-	if entries[4].Outcome != OutcomeRefused || entries[4].QueryHash != "" {
+	if entries[4].Outcome != OutcomeRefused || entries[4].QueryHash != "" || entries[4].QueryText != "DROP TABLE nodes" {
 		t.Errorf("refused entry %+v", entries[4])
+	}
+	// The text of a query that ran is not logged: only a refused or an
+	// invalid call, which has no hash of a canonical query, keeps it.
+	for _, e := range entries[:4] {
+		if e.QueryText != "" {
+			t.Errorf("a call that ran has query text: %+v", e)
+		}
 	}
 
 	// No result row, no node id, no name, no query text and no argument
 	// value is in the log.
 	log := audit.String()
-	for _, secret := range []string{"prod-vpc-0a1b", "arn:aws", "111111111111", prodVPC, prodSubnet, "module.network", "SELECT", "DROP"} {
+	for _, secret := range []string{"prod-vpc-0a1b", "arn:aws", "111111111111", prodVPC, prodSubnet, "module.network", "SELECT"} {
 		if strings.Contains(log, secret) {
 			t.Errorf("the audit log holds %q:\n%s", secret, log)
 		}
@@ -664,5 +672,50 @@ func TestRefusesToServeABadOrMissingSignature(t *testing.T) {
 				t.Errorf("the audit log has %q", audit.String())
 			}
 		})
+	}
+}
+
+// A refused or an invalid call keeps a bounded, single-line copy of its SQL,
+// so that what was asked can be reviewed; a call that ran keeps only hashes.
+func TestAuditLogKeepsTheTextOfRefusedAndInvalidQueries(t *testing.T) {
+	audit := &lockedBuffer{}
+	cs := connect(t, Config{Audit: audit})
+	multi := "DROP TABLE\nnodes;\r\n-- \x1b[31mred\x00\tthen\u2028more"
+	long := "SELECT '" + strings.Repeat("é", 2000) + "'; DROP TABLE nodes"
+	call[QueryOut](t, cs, "query", map[string]any{"sql": multi})
+	call[QueryOut](t, cs, "query", map[string]any{"sql": long})
+	call[QueryOut](t, cs, "query", map[string]any{"sql": "SELECT 1", "stored": "summary"}) // invalid
+	call[QueryOut](t, cs, "query", map[string]any{"sql": "SELECT 1", "limit": 99999})      // invalid
+	call[QueryOut](t, cs, "query", map[string]any{"sql": "SELECT count(*) FROM nodes"})    // ran
+	entries := readAudit(t, audit)
+	if len(entries) != 5 {
+		t.Fatalf("%d entries:\n%s", len(entries), audit.String())
+	}
+	if e := entries[0]; e.Outcome != OutcomeRefused || e.QueryText != "DROP TABLE nodes; -- [31mred then more" {
+		t.Errorf("a multi-line refusal: %q (%s)", e.QueryText, e.Outcome)
+	}
+	for _, e := range entries {
+		if strings.ContainsFunc(e.QueryText, func(r rune) bool { return r < ' ' || r == 0x7f || r == 0x2028 || r == 0x2029 }) {
+			t.Errorf("control characters in %q", e.QueryText)
+		}
+		if len(e.QueryText) > MaxAuditQueryBytes {
+			t.Errorf("%d bytes of query text, over the cap of %d", len(e.QueryText), MaxAuditQueryBytes)
+		}
+	}
+	if e := entries[1]; e.Outcome != OutcomeRefused || !e.QueryTextTruncated || len(e.QueryText) == 0 || !utf8.ValidString(e.QueryText) {
+		t.Errorf("a long refusal: truncated %v, %d bytes, outcome %s", e.QueryTextTruncated, len(e.QueryText), e.Outcome)
+	}
+	if e := entries[2]; e.Outcome != OutcomeInvalid || e.QueryText != "SELECT 1" || e.QueryTextTruncated {
+		t.Errorf("an invalid call: %+v", e)
+	}
+	if e := entries[3]; e.Outcome != OutcomeInvalid || e.QueryText != "SELECT 1" {
+		t.Errorf("an invalid limit: %+v", e)
+	}
+	if e := entries[4]; e.Outcome != OutcomeOK || e.QueryText != "" {
+		t.Errorf("a query that ran: %+v", e)
+	}
+	// One JSON object a line, whatever the text held.
+	if lines := strings.Split(strings.TrimSpace(audit.String()), "\n"); len(lines) != 5 {
+		t.Errorf("%d lines for 5 calls", len(lines))
 	}
 }
