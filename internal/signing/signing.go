@@ -133,12 +133,21 @@ func (v Verifier) Validate() error {
 		return errors.New("a keyless check needs --certificate-oidc-issuer (or --certificate-oidc-issuer-regexp)")
 	}
 	for _, re := range []string{v.IdentityRegexp, v.IssuerRegexp} {
-		if _, err := regexp.Compile(re); err != nil {
+		if re == "" {
+			continue
+		}
+		if _, err := regexp.Compile(anchor(re)); err != nil {
 			return fmt.Errorf("regular expression %q: %w", re, err)
 		}
 	}
 	return nil
 }
+
+// anchor makes a regular expression match the whole value: sigstore-go's
+// matcher finds the expression anywhere in it, so an identity such as
+// https://evil/x?github.com/org/repo would match github.com/org/repo. The
+// group keeps an alternation (a|b) whole.
+func anchor(re string) string { return "^(?:" + re + ")$" }
 
 // Inspect reads the signature file without checking it: unsigned, a bundle
 // that reads (signed, unverified), or a file that is not a bundle (invalid).
@@ -251,7 +260,15 @@ func (v Verifier) verifyKey(entity verify.SignedEntity, manifest []byte) (string
 const requiredSCTs = 1
 
 func (v Verifier) verifyKeyless(entity verify.SignedEntity, manifest []byte, trust root.TrustedMaterial, scts int) (string, error) {
-	id, err := verify.NewShortCertificateIdentity(v.Issuer, v.IssuerRegexp, v.Identity, v.IdentityRegexp)
+	// A regular expression is matched against the whole value.
+	var identityRe, issuerRe string
+	if v.IdentityRegexp != "" {
+		identityRe = anchor(v.IdentityRegexp)
+	}
+	if v.IssuerRegexp != "" {
+		issuerRe = anchor(v.IssuerRegexp)
+	}
+	id, err := verify.NewShortCertificateIdentity(v.Issuer, issuerRe, v.Identity, identityRe)
 	if err != nil {
 		return "", err
 	}

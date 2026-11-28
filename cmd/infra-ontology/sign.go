@@ -23,9 +23,9 @@ func addVerifyFlags(fs *flag.FlagSet) verifyFlags {
 	return verifyFlags{
 		key:         fs.String("key", "", "trust this PEM public key: the snapshot must carry a signature that checks with it (offline)"),
 		identity:    fs.String("certificate-identity", "", "trust a keyless signature by this certificate identity, an email address or a workflow URL (with --certificate-oidc-issuer); the snapshot must carry one"),
-		identityRe:  fs.String("certificate-identity-regexp", "", "the certificate's identity as a regular expression, matched against the whole identity"),
+		identityRe:  fs.String("certificate-identity-regexp", "", "the certificate's identity as a regular expression that must match all of it (anchored as ^(?:...)$)"),
 		issuer:      fs.String("certificate-oidc-issuer", "", "the OIDC issuer of the certificate, for example https://token.actions.githubusercontent.com"),
-		issuerRe:    fs.String("certificate-oidc-issuer-regexp", "", "the OIDC issuer as a regular expression, matched against the whole issuer"),
+		issuerRe:    fs.String("certificate-oidc-issuer-regexp", "", "the OIDC issuer as a regular expression that must match all of it (anchored as ^(?:...)$)"),
 		trustedRoot: fs.String("trusted-root", "", "a Sigstore trusted_root.json, to check a keyless signature offline (default: the public-good root, fetched with TUF)"),
 		require:     fs.Bool("require-signature", false, "fail if the snapshot has no signature that verified (implied by --key, or --certificate-identity with --certificate-oidc-issuer: what you trust must have signed it)"),
 	}
