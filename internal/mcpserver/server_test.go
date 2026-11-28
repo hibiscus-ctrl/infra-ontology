@@ -625,10 +625,6 @@ func TestSnapshotInfoReportsTheSignature(t *testing.T) {
 	if st.State != signing.Verified || !strings.HasPrefix(st.Signer, "sha256:") {
 		t.Errorf("signed, with the key: %+v", st)
 	}
-	// A verifier and an unsigned snapshot: reported as unsigned, and served.
-	if st := status(Config{Dir: copyEstate(t), Signature: signing.Verifier{KeyFile: keys.Public}}); st.State != signing.Unsigned {
-		t.Errorf("unsigned, with a key: %+v", st)
-	}
 }
 
 func TestTheInstructionsSayHowTheSnapshotIsSigned(t *testing.T) {
@@ -650,6 +646,7 @@ func TestRefusesToServeABadOrMissingSignature(t *testing.T) {
 		"another key":                 {Dir: dir, Signature: signing.Verifier{KeyFile: other.Public}},
 		"a file that is no bundle":    {Dir: garbage},
 		"unsigned, required":          {Dir: copyEstate(t), Signature: signing.Verifier{KeyFile: keys.Public}, RequireSignature: true},
+		"unsigned, a key to trust":    {Dir: copyEstate(t), Signature: signing.Verifier{KeyFile: keys.Public}},
 		"signed, required, unchecked": {Dir: dir, RequireSignature: true},
 	} {
 		t.Run(name, func(t *testing.T) {

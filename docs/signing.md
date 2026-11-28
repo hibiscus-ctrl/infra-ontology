@@ -74,11 +74,14 @@ A third step checks that the same bundle does not verify against another workflo
 
 | Snapshot | Result |
 | --- | --- |
-| No `manifest.sig.json` | Reported as `unsigned`. Verification passes. |
+| No `manifest.sig.json`, and no `--key` or identity given | Reported as `unsigned`. Verification passes. |
+| No `manifest.sig.json`, and a `--key` or an identity given | `FAILED`, exit 4: what you trust did not sign it. |
 | A signature, and no `--key` or identity given | Reported as `signed (unverified)`. It reads as a Sigstore bundle; it was not checked. Passes. |
 | A signature, and it checks against what you gave | Reported as `verified`, with the key's SHA-256 or the certificate's identity and issuer. Passes. |
 | A signature that does not check (wrong key or identity, a changed manifest, an edited bundle), or a file that is not a bundle | `FAILED`, exit 4. |
 | `--require-signature`, and no signature that verified | `FAILED`, exit 4. It needs `--key` or an identity to check with, or it is a usage error (exit 2). |
+
+**What you give is what you trust.** A `--key` or an identity (`--certificate-identity` or its regexp form, with an issuer) is a statement that this snapshot must be signed by it, so an unsigned snapshot fails on its own, with or without `--require-signature`. The flag is kept, and it adds nothing a key or an identity does not already say; it is the one that turns a missing signature into a failure when you have nothing to check with, and then the command refuses as a usage error rather than pass. Without any of these flags nothing is checked, and an unsigned snapshot passes. The same holds for `query`, `verify --answer` and `serve-mcp`.
 
 **With a key.** `--key PUBKEY` takes the PEM public key (`cosign.pub`). It works offline.
 
@@ -90,7 +93,7 @@ A key signature does not pass a keyless check and the reverse: `--key` requires 
 
 ## In the MCP server
 
-`serve-mcp` takes the same flags (`--key`, `--certificate-identity`, `--certificate-oidc-issuer`, `--trusted-root`, `--require-signature`). The `snapshot_info` tool and the server's instructions report the signature status: `unsigned`, `signed_unverified`, or `verified` with its signer when the server was started with something to check it with. A signature that does not check, or a signature file that is not a bundle, stops the server from starting (exit 4), as a snapshot that does not verify does; so does `--require-signature` on a snapshot with no verified signature. The status is read once, at start-up, with the snapshot.
+`serve-mcp` takes the same flags (`--key`, `--certificate-identity`, `--certificate-oidc-issuer`, `--trusted-root`, `--require-signature`). The `snapshot_info` tool and the server's instructions report the signature status: `unsigned`, `signed_unverified`, or `verified` with its signer when the server was started with something to check it with. A signature that does not check, or a signature file that is not a bundle, stops the server from starting (exit 4), as a snapshot that does not verify does; so does a snapshot with no verified signature when a `--key` or an identity was given, or `--require-signature`. The status is read once, at start-up, with the snapshot.
 
 ## What is read once
 

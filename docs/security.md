@@ -44,7 +44,7 @@ The planted-secret tests build snapshots from states and inventories that hold s
 
 ## Integrity and signing
 
-A snapshot is content-addressed: the manifest holds the SHA-256 of every table and the snapshot ID is the hash of the manifest, so `verify` catches a changed byte anywhere. That shows the snapshot is whole, not who made it. `snapshot sign` adds a Sigstore bundle over the manifest, from a key you hold or a keyless CI identity, and `verify` checks it against a key or an identity you trust ([signing.md](signing.md)). `serve-mcp` refuses a snapshot that does not verify, and with `--require-signature` one that is not signed by whom you expect.
+A snapshot is content-addressed: the manifest holds the SHA-256 of every table and the snapshot ID is the hash of the manifest, so `verify` catches a changed byte anywhere. That shows the snapshot is whole, not who made it. `snapshot sign` adds a Sigstore bundle over the manifest, from a key you hold or a keyless CI identity, and `verify` checks it against a key or an identity you trust ([signing.md](signing.md)). `serve-mcp` refuses a snapshot that does not verify, and with a `--key` or an identity to trust (or `--require-signature`) one that is not signed by whom you expect, an unsigned one included.
 
 Releases are built by a workflow from a tag: the checksums file is signed with cosign keyless and each archive has a build-provenance attestation ([install.md](install.md#check-the-download)). Every GitHub Action is pinned by full commit SHA, workflows run with the least permissions that work, and the repository runs CodeQL, `govulncheck` and OpenSSF Scorecard.
 

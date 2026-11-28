@@ -32,7 +32,8 @@ commands:
   snapshot verify [--json] <dir>      check a snapshot folder against its manifest, and its
                                       signature if it has one (--key PUBKEY, or --certificate-identity
                                       and --certificate-oidc-issuer; --trusted-root FILE,
-                                      --require-signature)
+                                      --require-signature). A key or identity given means
+                                      the snapshot must be signed by it: unsigned fails (exit 4)
   snapshot sign (--key FILE | --keyless) [--force] <dir>
                                       sign the manifest: write manifest.sig.json, a Sigstore bundle
   query <dir> --sql TEXT              read-only SQL over a snapshot, with row caps and a

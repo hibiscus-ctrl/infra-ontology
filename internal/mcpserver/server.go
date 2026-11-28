@@ -83,13 +83,15 @@ type Config struct {
 	Timeout time.Duration
 	// Version is the tool's version, reported to clients.
 	Version string
-	// Signature is what to trust when the snapshot is signed. Empty, the
-	// signature is read and reported as signed (unverified); a signature that
-	// is not a bundle, or does not check against it, is refused like a
-	// snapshot that does not verify.
+	// Signature is what to trust. Empty, the signature is read and reported
+	// as signed (unverified) or unsigned. Set, the snapshot must carry a
+	// signature that checks against it: unsigned, not a bundle, or not
+	// checking, it is refused like a snapshot that does not verify.
 	Signature signing.Verifier
 	// RequireSignature refuses a snapshot whose signature did not verify,
-	// absent or not. It needs Signature to name what to trust.
+	// absent or not. It needs Signature to name what to trust. A Signature
+	// that names something to trust implies it: a key that an unsigned
+	// snapshot passes would be no check.
 	RequireSignature bool
 }
 
@@ -152,7 +154,7 @@ func newServer(ctx context.Context, cfg Config) (*server, error) {
 	switch {
 	case sig.State == signing.Invalid:
 		return nil, fmt.Errorf("%w: %s: %s", ErrNotVerified, signing.File, sig.Problem)
-	case cfg.RequireSignature && sig.State != signing.Verified:
+	case (cfg.RequireSignature || cfg.Signature.Configured()) && sig.State != signing.Verified:
 		return nil, fmt.Errorf("%w: no signature that verifies, and one is required", ErrNotVerified)
 	}
 	eng := cfg.Engine

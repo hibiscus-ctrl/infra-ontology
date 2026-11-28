@@ -11,7 +11,7 @@ The server opens no port, reads no cloud or backend, takes no credentials and wr
 
 ## Start-up
 
-1. **Verify.** The snapshot is checked against its manifest, as `snapshot verify` does. A snapshot that does not verify is not served: the command prints why and exits 4. If the snapshot is signed, the signature is read too (see [signing](signing.md)): given `--key`, or `--certificate-identity` and `--certificate-oidc-issuer`, the server checks it and refuses to start on a signature that does not check; `--require-signature` also refuses a snapshot with no signature that verified. A signature file that is not a Sigstore bundle is refused too.
+1. **Verify.** The snapshot is checked against its manifest, as `snapshot verify` does. A snapshot that does not verify is not served: the command prints why and exits 4. If the snapshot is signed, the signature is read too (see [signing](signing.md)): given `--key`, or `--certificate-identity` and `--certificate-oidc-issuer`, the server checks it and refuses to start on a signature that does not check, and on a snapshot with no signature at all: a key or an identity to trust requires a signature that verifies. `--require-signature` says the same without naming one, and is a usage error alone. A signature file that is not a Sigstore bundle is refused too.
 2. **Open one locked session.** The tables are loaded into a private database file that is attached read-only, then the file is deleted and the session is locked, as [the query page](query.md#what-the-session-guarantees) describes. The engine itself refuses every write, and no file can be read, no extension loaded and no setting changed. One session serves every call.
 3. **Serve** until the client closes the connection.
 
