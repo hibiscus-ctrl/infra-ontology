@@ -59,10 +59,11 @@ func newListing(source string, inv Inventory, canonical func(string) string) *li
 			prev, seen := l.typeDone[t]
 			l.typeDone[t] = done && (!seen || prev)
 		}
+		// A scope's complete_types is what says a type was listed in full
+		// there. Its own "complete" says every type of the import was, which
+		// a listing that missed an unrelated type is not: that must not stop
+		// the types it did list in full from proving a resource gone.
 		for scope, d := range inv.Coverage.ScopeDone {
-			if !d.Complete {
-				continue
-			}
 			types := make(map[string]bool, len(d.Types))
 			for typ := range d.Types {
 				types[canonical(typ)] = true
@@ -130,8 +131,8 @@ func (b *builder) usable(l *listing) bool {
 
 // covers says the listing lists the type of n in the account and region of n
 // in full: every scope of the document that is the account and region has
-// no failed, skipped, excluded or left-out resource, is complete and names
-// the type among those it listed in full (those it found none of too), the type
+// no failed, skipped, excluded or left-out resource and names the type among
+// those it listed in full (those it found none of too), the type
 // has no failed, skipped, excluded or left-out resource and, where the
 // document has an entry for it, is complete, and its IDs of the type compare
 // to state (a resource of the type was joined). For Azure, which has no region in an ID, the account is

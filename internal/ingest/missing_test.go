@@ -140,9 +140,6 @@ func TestIncompleteListingsMarkNothingMissing(t *testing.T) {
 		"totals count left out ones":       func(i *Inventory) { i.Coverage.Totals.LeftOut = 1 },
 		"totals count excluded, no scopes": func(i *Inventory) { i.Coverage.Totals.Excluded = 1; i.Coverage.Scopes = nil },
 		"it does not say how complete":     func(i *Inventory) { i.Coverage = nil },
-		"scope is not complete": func(i *Inventory) {
-			i.Coverage.ScopeDone[missScope] = ScopeDone{Types: map[string]bool{"aws_instance": true}}
-		},
 		"scope says nothing of completion": func(i *Inventory) { i.Coverage.ScopeDone = nil },
 		"type is not in complete_types": func(i *Inventory) {
 			i.Coverage.ScopeDone[missScope] = ScopeDone{Complete: true, Types: map[string]bool{"aws_vpc": true}}
@@ -330,10 +327,12 @@ func TestCoverageThatIsNotWhole(t *testing.T) {
 		coverage string
 		missing  bool
 	}{
-		"whole":                      {completeCoverage, true},
-		"old document":               {`{"totals":{"failed":0,"excluded":0,"left_out":0},"types":[],"scopes":[]}`, false},
-		"old document, types":        {`{"totals":{"failed":0},"types":[{"type":"aws_instance","counts":{"failed":0}}],"scopes":[{"scope":"` + missScope + `","counts":{"failed":0}}]}`, false},
-		"scope not complete":         {`{"totals":{},"types":[{"type":"aws_instance","complete":true,"counts":{}}],"scopes":[{"scope":"` + missScope + `","complete":false,"complete_types":["aws_instance"],"counts":{}}]}`, false},
+		"whole":               {completeCoverage, true},
+		"old document":        {`{"totals":{"failed":0,"excluded":0,"left_out":0},"types":[],"scopes":[]}`, false},
+		"old document, types": {`{"totals":{"failed":0},"types":[{"type":"aws_instance","counts":{"failed":0}}],"scopes":[{"scope":"` + missScope + `","counts":{"failed":0}}]}`, false},
+		// The scope missed another type, but listed this one in full.
+		"scope not complete":         {`{"totals":{},"types":[{"type":"aws_instance","complete":true,"counts":{}}],"scopes":[{"scope":"` + missScope + `","complete":false,"complete_types":["aws_instance"],"counts":{}}]}`, true},
+		"scope has a failure":        {`{"totals":{},"types":[{"type":"aws_instance","complete":true,"counts":{}}],"scopes":[{"scope":"` + missScope + `","complete":false,"complete_types":["aws_instance"],"counts":{"failed":1}}]}`, false},
 		"type not in complete_types": {`{"totals":{},"types":[{"type":"aws_instance","complete":true,"counts":{}}],"scopes":[{"scope":"` + missScope + `","complete":true,"complete_types":["aws_vpc"],"counts":{}}]}`, false},
 		"type not complete":          {`{"totals":{},"types":[{"type":"aws_instance","complete":false,"counts":{}}],"scopes":[{"scope":"` + missScope + `","complete":true,"complete_types":["aws_instance"],"counts":{}}]}`, false},
 		// A type the document found none of has no entry; the scope's
