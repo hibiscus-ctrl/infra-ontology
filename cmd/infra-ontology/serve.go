@@ -48,7 +48,7 @@ func runServeMCP(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "infra-ontology serve-mcp: %v\n", err)
 		return exitUsage
 	}
-	cfg := mcpserver.Config{Dir: dirs[0], MemoryLimit: *memory, Tools: enabled, Audit: stderr, Version: version.Version, Signature: v, RequireSignature: *vf.require}
+	cfg := mcpserver.Config{Dir: dirs[0], MemoryLimit: *memory, Tools: enabled, Audit: stderr, Version: version.Version, Signature: v, RequireSignature: vf.required()}
 	if *auditLog != "" {
 		// Append-only: the log is never truncated, and others cannot read it.
 		f, err := os.OpenFile(*auditLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
