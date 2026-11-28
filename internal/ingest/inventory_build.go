@@ -190,6 +190,7 @@ func clearResource(res Resource) (Resource, bool) {
 		}
 	}
 	res.Root = Sanitise(res.Root)
+	res.Account, res.Region = validAccount(res.Cloud, res.Account), validRegion(res.Cloud, res.Region)
 	return res, true
 }
 

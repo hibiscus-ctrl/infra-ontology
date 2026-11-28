@@ -4,6 +4,7 @@
 package ingest
 
 import (
+	"regexp"
 	"strings"
 )
 
@@ -81,6 +82,7 @@ func scopeOf(cloud, id, arn, identityID string) scope {
 			}
 		}
 	}
+	s.account, s.region = validAccount(cloud, s.account), validRegion(cloud, s.region)
 	return s
 }
 
@@ -134,4 +136,59 @@ func firstOf(s ...string) string {
 // case: they may tell resources apart by it.
 func foldsCase(cloud, id string) bool {
 	return cloud == "azure" && isAzureID(id)
+}
+
+// The shapes of the accounts and regions each cloud writes. An account or a
+// region is cut from an ID, an ARN or an identity, and only a value of one of
+// these shapes is kept: the text of an ID that is not what it says it is must
+// not reach a column that is written as it is and left readable by hashing.
+var (
+	awsAccountShape  = regexp.MustCompile(`^[0-9]{12}$`)
+	uuidShape        = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	gcpProjectShape  = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]$`)
+	gcpProjectNumber = regexp.MustCompile(`^[0-9]{6,20}$`)
+	awsRegionShape   = regexp.MustCompile(`^[a-z]{2}(?:-[a-z]+){1,2}-[0-9]{1,2}$`)
+	azureRegionShape = regexp.MustCompile(`^[a-z][a-z0-9]{2,30}$`)
+	gcpRegionShape   = regexp.MustCompile(`^(?:[a-z]+-[a-z]+[0-9]+|us|eu|asia|global)$`)
+)
+
+// validAccount returns a if it has the shape of an account of the cloud (a
+// 12-digit AWS account, an Azure subscription's UUID, a Google project ID or
+// number), or of any cloud where the cloud is not known, and "" otherwise.
+func validAccount(cloud, a string) string {
+	ok := false
+	switch cloud {
+	case "aws":
+		ok = awsAccountShape.MatchString(a)
+	case "azure":
+		ok = uuidShape.MatchString(a)
+	case "gcp":
+		ok = gcpProjectShape.MatchString(a) || gcpProjectNumber.MatchString(a)
+	default:
+		ok = awsAccountShape.MatchString(a) || uuidShape.MatchString(a) || gcpProjectShape.MatchString(a)
+	}
+	if !ok {
+		return ""
+	}
+	return a
+}
+
+// validRegion returns r if it has the shape of a region of the cloud, or of
+// any cloud where the cloud is not known, and "" otherwise.
+func validRegion(cloud, r string) string {
+	ok := false
+	switch cloud {
+	case "aws":
+		ok = awsRegionShape.MatchString(r)
+	case "azure":
+		ok = azureRegionShape.MatchString(r)
+	case "gcp":
+		ok = gcpRegionShape.MatchString(r)
+	default:
+		ok = awsRegionShape.MatchString(r) || azureRegionShape.MatchString(r) || gcpRegionShape.MatchString(r)
+	}
+	if !ok {
+		return ""
+	}
+	return r
 }

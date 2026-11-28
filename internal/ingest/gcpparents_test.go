@@ -159,7 +159,8 @@ func TestGCPParentsAreNotMatchedAcrossCase(t *testing.T) {
 	upper := gcpNode(t, tb, nil, "projects/acme-prod/datasets/DS/tables/t")
 	wantParent(t, tb, upper, project, BasisProject)
 	wantParent(t, tb, gcpNode(t, tb, nil, gcpTable), gcpNode(t, tb, nil, gcpDataset), BasisResourcePath)
-	// Nor is a project of another case the same project.
+	// Nor is a project of another case the same project: a project ID is in
+	// lower case, so one that is not is no account, and has no project node of its own.
 	other := gcpInventory(Resource{Cloud: "gcp", Account: "Acme-Prod", Type: "google_compute_instance",
 		ID: "projects/Acme-Prod/zones/europe-west2-b/instances/vm", Status: "unmanaged", Basis: "none"})
 	res, err = BuildAll(nil, other, opts)
@@ -172,8 +173,8 @@ func TestGCPParentsAreNotMatchedAcrossCase(t *testing.T) {
 			n++
 		}
 	}
-	if n != 2 {
-		t.Errorf("%d project nodes, want 2 (acme-prod and Acme-Prod)", n)
+	if n != 1 {
+		t.Errorf("%d project nodes, want only acme-prod: Acme-Prod is not a project ID", n)
 	}
 }
 
