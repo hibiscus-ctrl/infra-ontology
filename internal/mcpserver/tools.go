@@ -99,15 +99,21 @@ type BlastIn struct {
 	Target   string `json:"target" jsonschema:"a node id, Terraform address, ARN or path, or cloud id"`
 	MaxDepth int    `json:"max_depth,omitempty" jsonschema:"hops to follow, 1 to 10; default 5"`
 	Limit    int    `json:"limit,omitempty" jsonschema:"most dependents to return, 1 to 1000; default 200"`
+	// IncludeAccess also follows can_assume, can_read and can_write edges.
+	IncludeAccess bool `json:"include_access,omitempty" jsonschema:"also follow access edges (can_assume, can_read, can_write): who may reach the target, not what breaks; default false"`
 }
 
-// BlastOut is what depends on a target. Status says how the target resolved:
+// BlastOut is what depends on a target, by dependency edges unless
+// IncludeAccess is set. Each row says which kind of edge reached it
+// (edge_kind) and the weakest confidence along the path (confidence). Status says how the target resolved:
 // "resolved" (one node), "ambiguous" (several: Targets lists them, and no
 // dependents are listed) or "not_found".
 type BlastOut struct {
 	Status   string `json:"status"`
 	Target   string `json:"target"`
 	MaxDepth int    `json:"max_depth"`
+	// IncludeAccess says whether access edges were followed.
+	IncludeAccess bool `json:"include_access"`
 	// Columns are those of Targets and Dependents; the first is depth.
 	Columns    []string `json:"columns"`
 	Targets    [][]any  `json:"targets"`
@@ -138,14 +144,19 @@ func (s *server) blastRadius(ctx context.Context, in BlastIn) (BlastOut, ran, er
 	}
 	// The cap is the dependents asked for and the target's own row, so that
 	// a target matching several nodes shows at least two rows at depth 0.
+	access := "0"
+	if in.IncludeAccess {
+		access = "1"
+	}
 	out, err := s.ask(ctx, query.Request{
-		Stored: "blast", Params: map[string]string{"node": in.Target, "depth": strconv.Itoa(depth)}, Caps: s.caps(limit + 1),
+		Stored: "blast", Params: map[string]string{"node": in.Target, "depth": strconv.Itoa(depth), "include_access": access},
+		Caps: s.caps(limit + 1),
 	})
 	if err != nil {
 		return BlastOut{}, nil, err
 	}
 	res := BlastOut{
-		Target: in.Target, MaxDepth: depth, Columns: out.Result.Columns, Answer: out.Answer,
+		Target: in.Target, MaxDepth: depth, IncludeAccess: in.IncludeAccess, Columns: out.Result.Columns, Answer: out.Answer,
 		Targets: [][]any{}, Dependents: [][]any{}, CountsByType: map[string]int{}, CountsByAccount: map[string]int{},
 	}
 	col := func(name string) int { return slices.Index(out.Result.Columns, name) }

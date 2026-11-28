@@ -82,7 +82,7 @@ func TestQueryList(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	for _, want := range []string{"blast (version 1)", "cone (version 1)", "unmanaged", "summary", "--param node=<string>", "(required)", "int 0..50"} {
+	for _, want := range []string{"blast (version 2)", "cone (version 2)", "unmanaged", "summary", "--param node=<string>", "(required)", "int 0..50"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("--list lacks %q:\n%s", want, out)
 		}

@@ -401,7 +401,7 @@ func TestStoredQueriesOnTheEstate(t *testing.T) {
 	if n := len(out.Result.Rows); n < 8 {
 		t.Errorf("blast of module.network: %d rows", n)
 	}
-	if out.Answer.StoredQuery != "blast" || out.Answer.StoredQueryVersion != 1 || out.Answer.Parameters["depth"] != "10" ||
+	if out.Answer.StoredQuery != "blast" || out.Answer.StoredQueryVersion != 2 || out.Answer.Parameters["depth"] != "10" ||
 		!strings.HasPrefix(out.Answer.StoredQueryHash, "sha256:") {
 		t.Errorf("the citation does not name the stored query: %+v", out.Answer)
 	}

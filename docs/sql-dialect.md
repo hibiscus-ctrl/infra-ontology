@@ -10,11 +10,12 @@ A query is exactly one statement, a `SELECT` or a `WITH ... SELECT` (recursive o
 | --- | --- |
 | `nodes`, `edges`, `sources` | the tables of the snapshot ([snapshot-format.md](snapshot-format.md)) |
 | `snapshot` | one row from the manifest: id, label, parent, status, the oldest and newest source time and the limits text |
-| `blast(node_id, depth)` | what depends on a node, directly or through others (follows edges backwards) |
-| `cone(node_id, depth)` | what a node needs (follows edges forwards) |
+| `blast(node_id, depth)` | what depends on a node, directly or through others (follows dependency edges backwards) |
+| `cone(node_id, depth)` | what a node needs (follows dependency edges forwards) |
+| `blast(node_id, depth, true)`, `cone(node_id, depth, true)` | the same, also following `can_assume`, `can_read` and `can_write` edges |
 | `unnest(...)` | the tags, which are a list of `{key, value}` pairs |
 
-The macros stop at the depth you give or 50, whichever is less. The query's own CTEs are fine.
+The macros stop at the depth you give or 50, whichever is less. They return `node_id`, `depth`, `edge_kind` (the kind of the edge that reached the node) and `confidence` (the weakest along the path). Without the third argument they skip access edges (`can_assume`, `can_read`, `can_write`), which say who may reach a node, not what breaks with it. The query's own CTEs are fine.
 
 An allow-list means anything not named is refused until someone reviews it. The checker is `internal/query/dialect.go`, and `internal/query/testdata/corpus.txt` is the corpus of allowed and refused queries, with a fuzz target over the parse trees.
 

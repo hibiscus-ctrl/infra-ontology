@@ -28,6 +28,13 @@ var (
 	MacroNames = []string{"blast", "cone"}
 )
 
+// AccessEdgeKinds are the edge kinds that say who may act on a node, not what
+// needs what: an inferred trust or an iam-lens result is not a dependency, so
+// blast, cone and their stored queries skip these unless a caller asks for
+// access edges. The stored files (queries/blast.sql and cone.sql) repeat the
+// list, and a test keeps them in step.
+var AccessEdgeKinds = []string{"can_assume", "can_read", "can_write"}
+
 // ErrUnavailable is returned by a build without the query engine.
 var ErrUnavailable = errors.New("query engine not built in (noduckdb build): run duckdb on the snapshot folder")
 

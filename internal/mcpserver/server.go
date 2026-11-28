@@ -217,8 +217,8 @@ func (s *server) register() {
 		mcp.AddTool(s.mcp, &mcp.Tool{
 			Name:  ToolBlastRadius,
 			Title: "What depends on a node",
-			Description: "Lists what depends on a node, directly or through others: what breaks or changes if it does. The target is a node id, a Terraform address, an ARN or a cloud id. " +
-				"A target that matches several nodes returns them as candidates and no guess. Read-only; cited.",
+			Description: "Lists what depends on a node, directly or through others: what breaks if it does. The target is a node id, a Terraform address, an ARN or a cloud id; several matches are returned as candidates. " +
+				"Follows dependency edges only; include_access also follows can_assume, can_read and can_write (who may reach it, inferred). Rows give edge_kind and confidence. Read-only; cited.",
 			Annotations: annotations(),
 		}, handle(s, ToolBlastRadius, s.blastRadius))
 	}
