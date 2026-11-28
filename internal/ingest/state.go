@@ -39,10 +39,13 @@ import (
 
 // Edge bases written by the state reader.
 const (
-	BasisStateDependency   = "state_dependency"
-	BasisModuleContainment = "module_containment"
-	BasisStateMembership   = "state_membership"
-	BasisRemoteState       = "remote_state"
+	BasisStateDependency = "state_dependency"
+	// BasisStateDependencyGroup is one edge for a dependency between resources
+	// of many instances each (see dependencies).
+	BasisStateDependencyGroup = "state_dependency_group"
+	BasisModuleContainment    = "module_containment"
+	BasisStateMembership      = "state_membership"
+	BasisRemoteState          = "remote_state"
 )
 
 // Read is what one location the user named held: the states in it, or why
@@ -54,14 +57,19 @@ type Read struct {
 	Err      error
 }
 
-// ReadAll reads each location in order. A location that fails is recorded
+// ReadAll reads each location in order, until ctx is done. A location that fails is recorded
 // and does not stop the rest, so that one state out of reach gives a partial
 // snapshot and not none.
 func ReadAll(ctx context.Context, locations []string, stores tfstate.Stores) []Read {
 	reads := make([]Read, 0, len(locations))
 	for _, loc := range locations {
 		r := Read{Location: loc}
-		r.Docs, r.Err = tfstate.Read(ctx, loc, stores)
+		if err := ctx.Err(); err != nil {
+			// A deadline or an interrupt stops the reading: what is left is not read.
+			r.Err = err
+		} else {
+			r.Docs, r.Err = tfstate.Read(ctx, loc, stores)
+		}
 		reads = append(reads, r)
 	}
 	return reads
@@ -181,8 +189,12 @@ type docState struct {
 	byAddress, byKeyless map[string][]string
 	// calls maps the keyless address of a module call to its nodes.
 	calls map[string][]string
-	// members are the nodes of the instances, in the order of the state.
-	members []member
+	// members are the nodes of the instances, in the order of the state, and
+	// instances the instances they were made of.
+	members   []member
+	instances []tfstate.Instance
+	// depEdges is how many depends_on edges the state made (see maxStateEdges).
+	depEdges int
 }
 
 type member struct {
@@ -218,7 +230,8 @@ type builder struct {
 	joined       map[string]bool
 	stateManaged []string
 
-	credentialIDs, tagsDropped, claimedManaged int
+	credentialIDs, tagsDropped, claimedManaged, mislabelled, tagValuesHashed int
+	cappedInstances, cappedEdges, collapsedDeps                              int
 
 	// key hashes the snapshot, if not nil (see Options.HashKey). raw holds the
 	// ID and ARN a state gave each resource node, as written, to be matched to
@@ -254,13 +267,22 @@ func (b *builder) fail(r Read) {
 	})
 }
 
+// failureList is the text of the sources that could not be read, for the error
+// of a build that read nothing. In a hashed build it is the text the manifest
+// has for a failed source, since an error holds the locations the hashing hides.
 func (b *builder) failureList() string {
 	var sb strings.Builder
+	cause := func(err error) string {
+		if b.key != nil {
+			return withheld
+		}
+		return Scrub(err.Error())
+	}
 	for _, r := range b.failed {
-		sb.WriteString("\n  " + Scrub(r.Err.Error()))
+		sb.WriteString("\n  " + cause(r.Err))
 	}
 	for _, r := range b.failedInventories {
-		sb.WriteString("\n  " + Scrub(r.Err.Error()))
+		sb.WriteString("\n  " + cause(r.Err))
 	}
 	return sb.String()
 }
@@ -318,13 +340,14 @@ func (b *builder) addDocument(d tfstate.Document) *docState {
 	src := snapshot.Source{
 		SourceID: s.source, Kind: snapshot.SourceState, Backend: BackendOf(d.Source), Location: loc,
 		Workspace: WorkspaceOf(d.Source), Lineage: d.Lineage, TerraformVersion: d.TerraformVersion,
-		DocumentSHA256: digest(d), CollectedAt: b.at(),
-		Collector: b.o.Collector, CollectorVersion: b.o.CollectorVersion, Status: snapshot.StatusOK,
+		CollectedAt: b.at(),
+		Collector:   b.o.Collector, CollectorVersion: b.o.CollectorVersion, Status: snapshot.StatusOK,
 	}
 	if d.Serial > 0 || d.Lineage != "" {
 		serial := d.Serial
 		src.Serial = &serial
 	}
+	srcIndex := len(b.sources)
 	b.sources = append(b.sources, src)
 
 	s.root = b.nodeID(snapshot.KindStateRoot, "", "", "", "", loc)
@@ -333,7 +356,13 @@ func (b *builder) addDocument(d tfstate.Document) *docState {
 		ManagedStatus: snapshot.Managed, Confidence: snapshot.Observed, SourceID: s.source,
 	})
 
-	for _, in := range d.Instances {
+	instances := d.Instances
+	if len(instances) > maxStateInstances {
+		b.cappedInstances += len(instances) - maxStateInstances
+		instances = instances[:maxStateInstances]
+	}
+	s.instances = instances
+	for _, in := range instances {
 		n := b.instanceNode(s, in)
 		b.addNode(n)
 		s.byAddress[in.Address] = append(s.byAddress[in.Address], n.NodeID)
@@ -359,6 +388,7 @@ func (b *builder) addDocument(d tfstate.Document) *docState {
 			}
 		}
 	}
+	b.sources[srcIndex].DocumentSHA256 = b.digest(s)
 	return s
 }
 
@@ -456,10 +486,9 @@ func (b *builder) addEdges(s *docState) {
 	for _, m := range s.members {
 		b.addEdge(snapshot.EdgeDefinedIn, BasisStateMembership, snapshot.Observed, m.node.NodeID, s.root, s.source)
 	}
-	for _, in := range s.doc.Instances {
-		for _, id := range s.byAddress[in.Address] {
-			b.dependencies(s, id, in)
-		}
+	for i, in := range s.instances {
+		// By position: instances with no address would share one.
+		b.dependencies(s, s.members[i].node.NodeID, in)
 	}
 	// Module containment: a call is in the call around it, or in the state.
 	// Walk every call of the state once.
@@ -491,16 +520,39 @@ func (b *builder) callID(s *docState, call string) string {
 }
 
 // dependencies adds an edge from an instance to each instance, data source or
-// module the state says it depends on.
+// module the state says it depends on. A dependency between resources of
+// several instances each would be an edge for every pair: past
+// maxDependencyFanout pairs it is one edge, from the first instance of the
+// resource that depends to the first of the one it depends on (basis
+// state_dependency_group, computed: the state names the resources, not which
+// instance needs which). An instance with no address is its own group.
 func (b *builder) dependencies(s *docState, from string, in tfstate.Instance) {
+	group := []string{from}
+	if in.Address != "" {
+		group = s.byKeyless[keyless(in.Address)]
+	}
 	for _, dep := range in.Dependencies {
 		to := slices.Concat(s.byKeyless[keyless(dep)], s.calls[keyless(dep)])
 		if len(to) == 0 {
 			b.unresolved++
 			continue
 		}
+		kind, basis, conf := snapshot.EdgeDependsOn, BasisStateDependency, snapshot.Observed
+		if len(group)*len(to) > maxDependencyFanout {
+			if len(group) > 0 && group[0] != from {
+				continue
+			}
+			to = to[:1]
+			basis, conf = BasisStateDependencyGroup, snapshot.Computed
+			b.collapsedDeps++
+		}
 		for _, id := range to {
-			b.addEdge(snapshot.EdgeDependsOn, BasisStateDependency, snapshot.Observed, from, id, s.source)
+			if s.depEdges >= maxStateEdges {
+				b.cappedEdges++
+				continue
+			}
+			s.depEdges++
+			b.addEdge(kind, basis, conf, from, id, s.source)
 		}
 	}
 }
@@ -527,6 +579,9 @@ func (b *builder) remoteStates(s *docState) {
 					}
 				}
 			}
+		}
+		if !found {
+			found = b.remoteStateByEnding(s, rs, from)
 		}
 		if found {
 			continue
@@ -556,6 +611,30 @@ func (b *builder) remoteStates(s *docState) {
 	}
 }
 
+// remoteStateByEnding adds an inferred edge from a terraform_remote_state of a
+// local file to the one state whose path ends in the path it names (see
+// consumerSuffixes), if it is the only one.
+func (b *builder) remoteStateByEnding(s *docState, rs tfstate.RemoteState, from string) bool {
+	var found []*docState
+	for _, suffix := range consumerSuffixes(rs, s.doc.Source) {
+		for key, producers := range b.producers {
+			if !endsWith(key, suffix) {
+				continue
+			}
+			for _, p := range producers {
+				if p != s && !slices.Contains(found, p) {
+					found = append(found, p)
+				}
+			}
+		}
+	}
+	if len(found) != 1 {
+		return false
+	}
+	b.addEdge(snapshot.EdgeReadsStateOf, BasisRemoteState, snapshot.Inferred, from, found[0].root, s.source)
+	return true
+}
+
 // tables returns the rows.
 func (b *builder) tables() snapshot.Tables {
 	t := snapshot.Tables{Sources: b.sources}
@@ -574,6 +653,9 @@ func (b *builder) limits() string {
 	s = append(s, b.readFrom()...)
 	if b.key != nil {
 		s = append(s, "IDs, names, Terraform addresses and state locations are HMAC-SHA256 hashes under a key this snapshot does not hold; types, accounts, regions and counts are readable.")
+		if b.tagValuesHashed > 0 {
+			s = append(s, strconv.Itoa(b.tagValuesHashed)+" tag values have the shape of a cloud identifier (an ARN, a resource path, an account number, an ID, a URL) or hold an ID, a state location or a module path of this snapshot, and are hashed with the same key.")
+		}
 	}
 	if b.o.DropAddresses {
 		s = append(s, "Terraform addresses, module paths and the Terraform names of resources and module calls are left out of the nodes, and so are the tags whose key or value holds one of them.")
@@ -606,6 +688,15 @@ func (b *builder) limits() string {
 	if b.unresolved > 0 {
 		s = append(s, strconv.Itoa(b.unresolved)+" dependencies name an address the state does not hold and are left out.")
 	}
+	if b.collapsedDeps > 0 {
+		s = append(s, fmt.Sprintf("%d dependencies between resources of many instances each (more than %d pairs) were collapsed to one edge, from the first instance of the one to the first of the other, with the basis %s.", b.collapsedDeps, maxDependencyFanout, BasisStateDependencyGroup))
+	}
+	if b.cappedInstances > 0 {
+		s = append(s, fmt.Sprintf("%d instances are past the cap of %d per state and are left out.", b.cappedInstances, maxStateInstances))
+	}
+	if b.cappedEdges > 0 {
+		s = append(s, fmt.Sprintf("%d dependency edges are past the cap of %d per state and are left out.", b.cappedEdges, maxStateEdges))
+	}
 	if b.duplicates > 0 {
 		s = append(s, strconv.Itoa(b.duplicates)+" resources are held by more than one state and are listed once, under the first state read.")
 	}
@@ -632,13 +723,20 @@ func (b *builder) readFrom() []string {
 		"Attribute values and output values are never read: the only values kept from a resource are its id, ARN and its tags, less the tags that look like secrets. A resource in both has the tags of its inventory, or those of its state where the inventory has none."}
 }
 
-// digest is the SHA-256 of what is kept of a state: its serial, lineage and
-// version, and the address, type, id and dependencies of each instance. It is
-// not the hash of the state's bytes, which are not kept. Tags are kept but
-// left out of it on purpose: an unkeyed hash over the raw tag values would let
-// anyone confirm a guess at one, a secret that no detector caught included.
-// So a change to a tag alone does not change the digest.
-func digest(d tfstate.Document) string {
+// digest is the SHA-256 of what a state's rows say: its serial, lineage and
+// version, and, for each instance, the address, module, type, name, id, ARN,
+// account and region of its node (as written, so an id the snapshot withholds
+// is not in it) and the dependencies; and where each terraform_remote_state
+// reads from. It is not the hash of the state's bytes, which are not kept.
+// It is unkeyed, so it leaves out what the snapshot leaves out: attribute
+// and output values, the tags (a hash over raw tag values would let anyone
+// confirm a guess at one, a secret that no detector caught included), and
+// the id of an instance withheld for being a credential or made up by
+// Terraform. A change to a tag alone does not change it. With
+// DropAddresses it leaves out the addresses, modules, names and dependencies
+// too.
+func (b *builder) digest(s *docState) string {
+	d := s.doc
 	h := sha256.New()
 	w := func(fields ...string) {
 		for _, f := range fields {
@@ -648,14 +746,22 @@ func digest(d tfstate.Document) string {
 		h.Write([]byte{'\n'})
 	}
 	w(strconv.FormatInt(d.Serial, 10), d.Lineage, d.TerraformVersion)
-	for _, in := range d.Instances {
-		w(append([]string{in.Mode, in.Address, in.Provider, in.ID, in.ARN, in.IdentityID}, in.Dependencies...)...)
-	}
-	for _, o := range d.Outputs {
-		w("output", o.Name, strconv.FormatBool(o.Sensitive))
+	for i, in := range s.instances {
+		n := s.members[i].node
+		fields := []string{in.Mode, n.TFType, n.NativeID, n.ARNOrPath, n.Account, n.Region}
+		if !b.o.DropAddresses {
+			fields = append(fields, in.Address, n.Module, n.Name)
+			fields = append(fields, in.Dependencies...)
+		}
+		w(fields...)
 	}
 	for _, r := range d.RemoteStates {
-		w("remote", r.Address, r.Backend, r.Account, r.Bucket, r.Key, r.Host, r.Organization, r.Workspace)
+		loc, _ := remoteLocation(r, d.Source)
+		if b.o.DropAddresses {
+			w("remote", r.Backend, loc)
+		} else {
+			w("remote", r.Address, r.Backend, loc)
+		}
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -666,3 +772,20 @@ var freeTextProviders = map[string]bool{
 	"random": true, "http": true, "external": true, "local": true,
 	"null": true, "time": true, "archive": true, "tls": true,
 }
+
+// The bounds of what one state, and one inventory file, may make: the work a
+// document can ask for is not in proportion to its size, since a dependency on
+// a resource of many instances is an edge to each. Past a bound the rest is
+// counted in the manifest's limits and left out.
+var (
+	// maxStateInstances is the most instances of one state that are read.
+	maxStateInstances = 200000
+	// maxStateEdges is the most depends_on edges one state makes.
+	maxStateEdges = 1000000
+	// maxDependencyFanout is the most edges one dependency between two
+	// resources makes (instances of the one times instances of the other): a
+	// dependency of more is collapsed to one edge between the first instances.
+	maxDependencyFanout = 64
+	// maxInventoryBytes is the largest inventory file read.
+	maxInventoryBytes int64 = 256 << 20
+)

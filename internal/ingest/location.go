@@ -207,7 +207,8 @@ func producerKey(source string) string {
 
 // consumerKeys are the keys a terraform_remote_state's configuration can
 // name a state by: what the backend writes the workspace's state as. The
-// remote state of a local file is matched by what its path ends in.
+// path of a local file is the one localPath resolves (see consumerSuffixes for
+// where it does not place the file).
 func consumerKeys(rs tfstate.RemoteState, from string) []string {
 	ws := rs.Workspace
 	named := ws != "" && ws != "default"
@@ -252,16 +253,7 @@ func consumerKeys(rs tfstate.RemoteState, from string) []string {
 		if rs.Key == "" {
 			return nil
 		}
-		resolved := localPath(rs.Key, from)
-		keys := []string{"local|" + resolved}
-		// The path as written is offered too, matched by what a producer path
-		// ends in, as before paths were placed: it finds states read from
-		// another layout than the one they were written in. A path that climbs
-		// out (..) is only matched where it resolves.
-		if plain := path.Clean(filepath.ToSlash(rs.Key)); plain != resolved && !strings.HasPrefix(plain, "..") {
-			keys = append(keys, "local|"+plain)
-		}
-		return keys
+		return []string{"local|" + localPath(rs.Key, from)}
 	}
 	return nil
 }
@@ -320,17 +312,36 @@ func remoteLocation(rs tfstate.RemoteState, from string) (string, bool) {
 	return Sanitise(loc), true
 }
 
-// matches reports whether the state at key is the one consumer names. A
-// local path matches when it ends with the consumer's path.
-func matches(producer, consumer string) bool {
-	if producer == consumer {
-		return true
+// matches reports whether the state at producer is the one consumer names: the
+// same key, which for a local file is the same path (see localPath).
+func matches(producer, consumer string) bool { return producer == consumer }
+
+// consumerSuffixes are the paths a local terraform_remote_state is matched to a
+// state by when no state is at the path it resolves to (see localPath): the
+// resolved path where the consumer's own location does not place it in full
+// (it is relative), and the path as written. A state whose path ends in one,
+// and is the only one that does, is the likely one, and the edge to it is
+// inferred. A path that climbs out (..) is only matched where it resolves.
+func consumerSuffixes(rs tfstate.RemoteState, from string) []string {
+	if rs.Backend != "local" || rs.Key == "" {
+		return nil
 	}
-	if rest, ok := strings.CutPrefix(consumer, "local|"); ok && strings.HasPrefix(producer, "local|") {
-		p := strings.TrimPrefix(producer, "local|")
-		return !strings.HasPrefix(rest, "..") && strings.HasSuffix(p, "/"+rest)
+	var out []string
+	resolved := localPath(rs.Key, from)
+	if !path.IsAbs(resolved) && !strings.HasPrefix(resolved, "..") {
+		out = append(out, resolved)
 	}
-	return false
+	if plain := path.Clean(filepath.ToSlash(rs.Key)); plain != resolved && !path.IsAbs(plain) && !strings.HasPrefix(plain, "..") {
+		out = append(out, plain)
+	}
+	return out
+}
+
+// endsWith reports whether the state at the producer key is a local file whose
+// path is, or ends with, the whole segments of suffix.
+func endsWith(producer, suffix string) bool {
+	p, ok := strings.CutPrefix(producer, "local|")
+	return ok && (p == suffix || strings.HasSuffix(p, "/"+suffix))
 }
 
 // localPath is the slash path a local terraform_remote_state reads: a

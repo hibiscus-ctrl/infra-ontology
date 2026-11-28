@@ -46,6 +46,8 @@ An inventory that hashes its IDs (`infraharvest export --hash-ids`) is matched t
 
 Inventories that are not hashed are matched in the clear whatever `--hash-ids` says, and their IDs, names, addresses and paths are hashed as the snapshot is written.
 
+The `ids_hashed` flag of a document is a claim, and is checked: a hashed inventory must hold only values with the shape of a hash (64 hexadecimal digits) in its IDs, names, addresses, module paths and roots. One that holds any other is read as not hashed, and `limits` says how many were, so that with `--hash-ids` its values are hashed here with the key and a document that is mislabelled cannot put a raw identifier into a snapshot whose manifest says `hmac-sha256`.
+
 A resource listed by more than one document is one node: it keeps the status that knows most (`managed`, then `other_iac`, then `unmanaged`) and what each document gives.
 
 ## Missing resources
@@ -90,7 +92,9 @@ A test builds a snapshot from inventories that hold secrets in IDs, names, tags,
 
 ## Sources
 
-Each file is a `sources` row of kind `inventory`: backend `file`, its path, `collector` `infraharvest` with its version, the time the document says it was made (`generated_at`, or the newest event's time), and `document_sha256`, the hash of what was kept of it. A file that cannot be read, or is not one of the two documents, is a source with status `failed` and a reason, the snapshot is `partial` and the command exits with 3. If nothing could be read, nothing is written and it exits with 1. A file that does not exist is a usage error (2). An inventory that counts resources whose import failed (`coverage.totals.failed`) is `partial` too.
+An inventory file is read only up to 256 MiB; a larger one is a failed source, and the rest of the snapshot is built.
+
+Each file is a `sources` row of kind `inventory`: backend `file`, its path, `collector` `infraharvest` with its version, the time the document says it was made (`generated_at`, or the newest event's time), and `document_sha256`, the hash of what was kept of it: what is written to the nodes, so a resource left out for an ID that is a credential, a name or an address that is one, and every tag are not in it (it is unkeyed, so it must not let anyone confirm a guess at what the snapshot withholds), and a change to a tag alone does not change it. A file that cannot be read, or is not one of the two documents, is a source with status `failed` and a reason, the snapshot is `partial` and the command exits with 3. If nothing could be read, nothing is written and it exits with 1. A file that does not exist is a usage error (2). An inventory that counts resources whose import failed (`coverage.totals.failed`) is `partial` too.
 
 ## What it cannot tell you
 

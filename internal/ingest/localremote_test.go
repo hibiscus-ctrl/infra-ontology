@@ -72,3 +72,89 @@ func TestLocalPath(t *testing.T) {
 		}
 	}
 }
+
+func localDoc(source, key string) tfstate.Document {
+	d := tfstate.Document{Source: source, Serial: 1, Lineage: "l"}
+	if key != "" {
+		d.RemoteStates = []tfstate.RemoteState{{Address: "data.terraform_remote_state.x", Backend: "local", Key: key}}
+	}
+	return d
+}
+
+func remoteReads(tb snapshot.Tables, from string) (observed, inferred []string) {
+	for _, n := range tb.Nodes {
+		if n.Kind != snapshot.KindStateRoot {
+			continue
+		}
+		for _, e := range tb.Edges {
+			if e.Kind == snapshot.EdgeReadsStateOf && e.FromID == from && e.ToID == n.NodeID {
+				if e.Confidence == snapshot.Observed {
+					observed = append(observed, n.NativeID)
+				} else {
+					inferred = append(inferred, n.NativeID)
+				}
+			}
+		}
+	}
+	return observed, inferred
+}
+
+func localBuild(t *testing.T, docs ...tfstate.Document) snapshot.Tables {
+	t.Helper()
+	var reads []Read
+	for _, d := range docs {
+		reads = append(reads, Read{Location: d.Source, Docs: []tfstate.Document{d}})
+	}
+	return build(t, reads).Tables
+}
+
+func rootOf(source string) string {
+	return snapshot.NodeID(snapshot.KindStateRoot, "", "", "", "", source)
+}
+
+// A plain key is the consumer's own directory, not any state that ends in it.
+func TestLocalRemoteStateKeyIsNotMatchedByItsEnding(t *testing.T) {
+	tb := localBuild(t,
+		localDoc("/work/app/terraform.tfstate", "terraform.tfstate"),
+		localDoc("/work/a/terraform.tfstate", ""),
+		localDoc("/work/b/terraform.tfstate", ""),
+	)
+	obs, inf := remoteReads(tb, rootOf("/work/app/terraform.tfstate"))
+	if len(obs) != 0 || len(inf) != 0 {
+		t.Errorf("terraform.tfstate of /work/app links to %v (observed) and %v (inferred)", obs, inf)
+	}
+}
+
+// Where the consumer's own path is not known in full, a path is matched by its
+// ending, and only a single state may be.
+func TestLocalRemoteStateMatchedByEndingNeedsOneStateAndIsInferred(t *testing.T) {
+	one := localBuild(t,
+		localDoc("app/terraform.tfstate", "../net/terraform.tfstate"),
+		localDoc("/srv/net/terraform.tfstate", ""),
+	)
+	obs, inf := remoteReads(one, rootOf("app/terraform.tfstate"))
+	if len(obs) != 0 || len(inf) != 1 || inf[0] != "/srv/net/terraform.tfstate" {
+		t.Errorf("one state ending in the path: observed %v, inferred %v", obs, inf)
+	}
+	two := localBuild(t,
+		localDoc("app/terraform.tfstate", "../net/terraform.tfstate"),
+		localDoc("/srv/net/terraform.tfstate", ""),
+		localDoc("/opt/net/terraform.tfstate", ""),
+	)
+	obs, inf = remoteReads(two, rootOf("app/terraform.tfstate"))
+	if len(obs) != 0 || len(inf) != 0 {
+		t.Errorf("two states end in the path, yet: observed %v, inferred %v", obs, inf)
+	}
+}
+
+func TestLocalRemoteStateOfTheResolvedPathIsObserved(t *testing.T) {
+	tb := localBuild(t,
+		localDoc("app/terraform.tfstate", "../net/terraform.tfstate"),
+		localDoc("net/terraform.tfstate", ""),
+		localDoc("/srv/net/terraform.tfstate", ""),
+	)
+	obs, inf := remoteReads(tb, rootOf("app/terraform.tfstate"))
+	if len(obs) != 1 || obs[0] != "net/terraform.tfstate" || len(inf) != 0 {
+		t.Errorf("observed %v, inferred %v", obs, inf)
+	}
+}

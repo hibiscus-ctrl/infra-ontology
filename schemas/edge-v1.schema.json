@@ -32,7 +32,7 @@
       "enum": ["observed", "computed", "inferred"]
     },
     "basis": {
-      "description": "A short code for why the edge exists, for example state_dependency, module_containment, remote_state, catalogue_child or resource_path, and for can_assume trust_policy, trust_policy_cross_account, trust_policy_account, trust_policy_condition, trust_policy_deny or trust_policy_wildcard, and for can_read and can_write iam_lens, iam_lens_condition, iam_lens_public, iam_lens_public_condition, iam_lens_cross_account, iam_lens_unknown_account or iam_lens_account. Open to additions in a minor version.",
+      "description": "A short code for why the edge exists, for example state_dependency, state_dependency_group, module_containment, remote_state, catalogue_child or resource_path, and for can_assume trust_policy, trust_policy_cross_account, trust_policy_account, trust_policy_condition, trust_policy_deny or trust_policy_wildcard, and for can_read and can_write iam_lens, iam_lens_condition, iam_lens_public, iam_lens_public_condition, iam_lens_cross_account, iam_lens_unknown_account, iam_lens_account or iam_lens_partial. A dependency between resources of many instances each is one state_dependency_group edge. Open to additions in a minor version.",
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]*$"
     },

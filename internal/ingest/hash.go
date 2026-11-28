@@ -6,6 +6,7 @@ package ingest
 import (
 	"encoding/hex"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -22,6 +23,10 @@ const HashAlgorithm = "hmac-sha256"
 // withheld replaces the reason a source could not be read in a hashed
 // snapshot: an error holds the paths and bucket names the hashing hides.
 const withheld = "could not be read; the cause is not kept because the snapshot hashes locations"
+
+// Withheld is withheld for the command, which prints it in place of the cause
+// of a failure in a hashed build.
+const Withheld = withheld
 
 // rawID is the ID and ARN a state gave a resource, as it wrote them.
 type rawID struct{ id, arn string }
@@ -65,9 +70,10 @@ func (b *builder) markHashed(id string, fields ...string) {
 }
 
 // hashField hashes the value of a column of a node, unless it is one an
-// inventory hashed.
+// inventory hashed. The mark is a claim: a value is kept as it is only if it
+// has the shape of a hash (see hashedValue), and any other is hashed here.
 func (b *builder) hashField(id, field, v string) string {
-	if b.preHashed[id+"\x00"+field] {
+	if b.preHashed[id+"\x00"+field] && hashedValue(v) {
 		return v
 	}
 	return b.h(v)
@@ -89,6 +95,11 @@ func (b *builder) hashField(id, field, v string) string {
 func (b *builder) redactTables(t snapshot.Tables) snapshot.Tables {
 	if b.key == nil && !b.o.DropAddresses {
 		return t
+	}
+	var ids identifierSet
+	if b.key != nil {
+		// Before the addresses and module paths are cleared.
+		ids = identifiers(t)
 	}
 	if b.o.DropAddresses {
 		states := map[string]bool{}
@@ -120,6 +131,7 @@ func (b *builder) redactTables(t snapshot.Tables) snapshot.Tables {
 	if b.key == nil {
 		return t
 	}
+	b.hideTagIdentifiers(t, ids)
 	for i, n := range t.Nodes {
 		id := n.NodeID
 		n.NativeID = b.hashField(id, "native_id", n.NativeID)
@@ -302,4 +314,148 @@ func (b *builder) hideIdentifiers(tags map[string]string, ids ...string) map[str
 		return nil
 	}
 	return kept
+}
+
+// Shapes of the values that name a thing in a cloud. A tag value of one of
+// these shapes is an identifier, whichever resource it names, and a hashed
+// snapshot keeps no identifier readable.
+var (
+	// arnValue finds an ARN anywhere in a value.
+	arnValue = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])arn:aws[a-z-]*:`)
+	// pathValue finds the start of an Azure resource ID, or of a Google
+	// resource name, at the start of a value or after a separator.
+	pathValue = regexp.MustCompile(`(?i)(?:^|[\s,;=:"'(])(?:/(?:subscriptions|providers|tenants)/|(?:projects|folders|organizations|billingaccounts)/[a-z0-9])`)
+	// accountValue finds a standalone number of 12 digits: an AWS account.
+	accountValue = regexp.MustCompile(`(?:^|\D)[0-9]{12}(?:\D|$)`)
+	// uuidValue finds a UUID: an Azure subscription, tenant or object.
+	uuidValue = regexp.MustCompile(`(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
+	// cloudIDValue finds a <prefix>-<hex> ID, as AWS writes them (vpc-0abc..,
+	// i-0123.., sg-..).
+	cloudIDValue = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])([a-z][a-z0-9]{0,11})-([0-9a-f]{8,})(?:[^a-z0-9]|$)`)
+	// hostValue finds the host of a cloud's storage or API endpoint.
+	hostValue = regexp.MustCompile(`(?i)\.(?:amazonaws\.com|blob\.core\.windows\.net|googleapis\.com)(?:[^a-z0-9]|$)`)
+)
+
+// awsIDPrefixes are the prefixes of the IDs AWS writes with a hexadecimal
+// part, which are IDs whatever the digits are (vpc-12345678).
+var awsIDPrefixes = map[string]bool{
+	"vpc": true, "subnet": true, "sg": true, "i": true, "ami": true, "vol": true, "snap": true, "eni": true,
+	"igw": true, "nat": true, "rtb": true, "acl": true, "vpce": true, "pcx": true, "tgw": true, "eipalloc": true,
+	"eipassoc": true, "lt": true, "fl": true, "vgw": true, "cgw": true, "vpn": true, "dopt": true, "rtbassoc": true,
+}
+
+// identifierShaped says a value has the shape of an identifier of a thing in
+// a cloud: an ARN, an Azure resource ID or a Google resource name, a
+// 12-digit account number, a UUID, a <prefix>-<hex> ID, a URL (a bucket path
+// among them) or the host of a cloud endpoint.
+func identifierShaped(v string) bool {
+	if v == "" || hashedValue(v) {
+		return false
+	}
+	if strings.Contains(v, "://") || arnValue.MatchString(v) || pathValue.MatchString(v) ||
+		accountValue.MatchString(v) || uuidValue.MatchString(v) || hostValue.MatchString(v) {
+		return true
+	}
+	for _, m := range cloudIDValue.FindAllStringSubmatch(v, -1) {
+		hexPart := m[2]
+		if awsIDPrefixes[strings.ToLower(m[1])] || strings.ContainsAny(hexPart, "0123456789") && strings.ContainsAny(strings.ToLower(hexPart), "abcdef") {
+			return true
+		}
+	}
+	return false
+}
+
+// identifierSet is what the tags of the nodes of a snapshot must not name: the
+// places states and inventories were read from, the module paths, and the IDs
+// of the nodes.
+type identifierSet struct {
+	// contained are matched anywhere in a value: they are long and have
+	// separators of their own.
+	contained []string
+	// tokens are matched as a whole value, or as a token of one (split at
+	// anything but a letter, a digit, "-", "_" and ".").
+	tokens map[string]bool
+}
+
+// identifiers collects the identifierSet of the tables, before anything is
+// hashed or cleared.
+func identifiers(t snapshot.Tables) identifierSet {
+	set := identifierSet{tokens: map[string]bool{}}
+	seen := map[string]bool{}
+	contain := func(v string) {
+		l := strings.ToLower(v)
+		if len(l) >= minIdentifier && !seen[l] && !hashedValue(v) {
+			seen[l] = true
+			set.contained = append(set.contained, l)
+		}
+	}
+	token := func(v string) {
+		if len(v) >= minIdentifier && !hashedValue(v) {
+			set.tokens[strings.ToLower(v)] = true
+		}
+	}
+	for _, s := range t.Sources {
+		contain(s.Location)
+	}
+	for _, n := range t.Nodes {
+		contain(n.Module)
+		contain(n.Root)
+		token(n.NativeID)
+		token(n.ARNOrPath)
+	}
+	sort.Strings(set.contained)
+	return set
+}
+
+// names says v is, or holds as a token, an identifier of the set, or holds
+// one of its places and module paths.
+func (s identifierSet) names(v string) bool {
+	l := strings.ToLower(v)
+	if s.tokens[l] {
+		return true
+	}
+	for _, c := range s.contained {
+		if strings.Contains(l, c) {
+			return true
+		}
+	}
+	for _, tok := range strings.FieldsFunc(l, func(r rune) bool {
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' && r != '_' && r != '.'
+	}) {
+		if s.tokens[tok] {
+			return true
+		}
+	}
+	return false
+}
+
+// hideTagIdentifiers is the last step of the tags of a hashed build, run on
+// the tables with everything they name still readable: a tag value of the shape
+// of an identifier (see identifierShaped), or that is or holds an identifier
+// of the set, has its value hashed with the same hash as the ID it is, so that
+// it still joins; a tag whose key has the shape of one is dropped, and not
+// listed, since the list would show it.
+func (b *builder) hideTagIdentifiers(t snapshot.Tables, set identifierSet) {
+	for i, n := range t.Nodes {
+		if len(n.Tags) == 0 {
+			continue
+		}
+		kept := make(map[string]string, len(n.Tags))
+		for k, v := range n.Tags {
+			switch {
+			case identifierShaped(k):
+				b.tagsDropped++
+			case !hashedValue(v) && (identifierShaped(v) || set.names(v)):
+				kept[k] = secretscan.HashID(b.key, v)
+				b.tagValuesHashed++
+			default:
+				kept[k] = v
+			}
+		}
+		if len(kept) == 0 {
+			kept = nil
+		}
+		n.Tags = kept
+		t.Nodes[i] = n
+	}
 }

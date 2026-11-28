@@ -120,6 +120,10 @@ func TestMatching(t *testing.T) {
 		for _, want := range consumerKeys(c.rs, "") {
 			hit = hit || matches(producerKey(c.source), want)
 		}
+		// A consumer with no place of its own matches by the ending.
+		for _, suffix := range consumerSuffixes(c.rs, "") {
+			hit = hit || endsWith(producerKey(c.source), suffix)
+		}
 		if hit != c.wantHit {
 			t.Errorf("%s: matched = %v, want %v", c.name, hit, c.wantHit)
 		}

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -279,6 +280,7 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 	hashIDs := fs.Bool("hash-ids", false, "hash IDs, ARNs, names, Terraform addresses and state locations with HMAC-SHA256, under a key from "+keyEnv+" (or "+secretscan.KeyEnv+") or --hash-key-file")
 	hashKeyFile := fs.String("hash-key-file", "", "the file that holds the key --hash-ids hashes with (16 bytes at least)")
 	dropAddresses := fs.Bool("drop-addresses", false, "leave Terraform addresses, module paths and the Terraform names of resources and module calls out of the snapshot's nodes, to share it outside the team; node IDs of module calls, data sources and resources without an ID stay unkeyed hashes of state location and address unless --hash-ids is also used")
+	timeout := fs.Duration("timeout", defaultBuildTimeout, "the longest the build may take, reading states and inventories included; 0 sets no deadline. SIGINT and SIGTERM stop it too")
 	from := fs.String("from-json", "", "the JSON file of nodes, edges and sources to build from (test and development path)")
 	out := fs.String("out", filepath.Join(".infra-ontology", "snapshots"), "the folder to write the snapshot folder into")
 	label := fs.String("label", "", "a name for the snapshot (overrides the file's)")
@@ -293,6 +295,9 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	case *from == "" && len(states) == 0 && len(inventories) == 0:
 		fmt.Fprintln(stderr, "infra-ontology snapshot build: --state LOCATION or --inventory FILE is required (or --from-json FILE, for tests)")
+		return exitUsage
+	case *timeout < 0:
+		fmt.Fprintln(stderr, "infra-ontology snapshot build: --timeout must not be negative")
 		return exitUsage
 	case *hashKeyFile != "" && !*hashIDs:
 		fmt.Fprintln(stderr, "infra-ontology snapshot build: --hash-key-file is for --hash-ids")
@@ -351,7 +356,7 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 			}
 			in.HashKey = key
 		}
-		if res, code = readSources(states, inventories, iamLens, in, stderr); code != exitOK && code != exitPartial {
+		if res, code = readSources(states, inventories, iamLens, in, *timeout, stderr); code != exitOK && code != exitPartial {
 			return code
 		}
 		tables, opts.Limits, opts.Redaction = res.Tables, res.Limits, res.Redaction
@@ -386,11 +391,15 @@ func readEstate(file string, est *estateFile, stderr io.Writer) int {
 	return exitOK
 }
 
+// defaultBuildTimeout is how long a build may take unless --timeout says
+// otherwise: ample for a few states in a store, and an end to a store that hangs.
+const defaultBuildTimeout = 10 * time.Minute
+
 // readSources reads the states and the inventories the user named. It returns
 // exitUsage for a location this build cannot read or a file that is not there,
 // exitFailed if nothing could be read and exitPartial if some could not: the
 // snapshot then says which.
-func readSources(locations, files, access []string, o ingest.Options, stderr io.Writer) (ingest.Result, int) {
+func readSources(locations, files, access []string, o ingest.Options, timeout time.Duration, stderr io.Writer) (ingest.Result, int) {
 	resolved := make([]string, 0, len(locations))
 	for _, l := range locations {
 		r, err := ingest.Resolve(l)
@@ -416,10 +425,16 @@ func readSources(locations, files, access []string, o ingest.Options, stderr io.
 		}
 	}
 	o.Access = ingest.ReadAccessFiles(access)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
 	res, err := ingest.BuildAll(ingest.ReadAll(ctx, resolved, ingest.Stores()), ingest.ReadInventories(files), o)
 	if err != nil {
+		// BuildAll's text holds no location or store error in a hashed build.
 		fmt.Fprintf(stderr, "infra-ontology snapshot build: %v\n", err)
 		return ingest.Result{}, exitFailed
 	}
