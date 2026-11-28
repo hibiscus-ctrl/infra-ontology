@@ -566,6 +566,9 @@ func (b *builder) remoteStates(s *docState) {
 				}
 			}
 		}
+		if !found {
+			found = b.remoteStateByEnding(s, rs, from)
+		}
 		if found {
 			continue
 		}
@@ -592,6 +595,30 @@ func (b *builder) remoteStates(s *docState) {
 		})
 		b.addEdge(snapshot.EdgeReadsStateOf, BasisRemoteState, snapshot.Observed, from, id, s.source)
 	}
+}
+
+// remoteStateByEnding adds an inferred edge from a terraform_remote_state of a
+// local file to the one state whose path ends in the path it names (see
+// consumerSuffixes), if it is the only one.
+func (b *builder) remoteStateByEnding(s *docState, rs tfstate.RemoteState, from string) bool {
+	var found []*docState
+	for _, suffix := range consumerSuffixes(rs, s.doc.Source) {
+		for key, producers := range b.producers {
+			if !endsWith(key, suffix) {
+				continue
+			}
+			for _, p := range producers {
+				if p != s && !slices.Contains(found, p) {
+					found = append(found, p)
+				}
+			}
+		}
+	}
+	if len(found) != 1 {
+		return false
+	}
+	b.addEdge(snapshot.EdgeReadsStateOf, BasisRemoteState, snapshot.Inferred, from, found[0].root, s.source)
+	return true
 }
 
 // tables returns the rows.
