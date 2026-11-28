@@ -30,11 +30,11 @@ var (
 	maxManifestBytes int64 = 16 << 20
 )
 
-// readRegular reads a file that is a regular file of at most max bytes. A
+// readRegular reads a file that is a regular file of at most limit bytes. A
 // symbolic link, a directory, a device or a pipe is refused rather than
-// followed or waited on, and a file larger than max is refused before it is
+// followed or waited on, and a file larger than limit is refused before it is
 // read; the size is also enforced while reading, in case it grows.
-func readRegular(path string, max int64) ([]byte, error) {
+func readRegular(path string, limit int64) ([]byte, error) {
 	st, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
@@ -42,8 +42,8 @@ func readRegular(path string, max int64) ([]byte, error) {
 	if !st.Mode().IsRegular() {
 		return nil, errors.New("not a regular file (a link, directory or device is not part of a snapshot)")
 	}
-	if st.Size() > max {
-		return nil, fmt.Errorf("%d bytes, over the limit of %d", st.Size(), max)
+	if st.Size() > limit {
+		return nil, fmt.Errorf("%d bytes, over the limit of %d", st.Size(), limit)
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -54,12 +54,12 @@ func readRegular(path string, max int64) ([]byte, error) {
 	if opened, err := f.Stat(); err != nil || !os.SameFile(st, opened) {
 		return nil, errors.New("not a regular file (it changed while it was opened)")
 	}
-	b, err := io.ReadAll(io.LimitReader(f, max+1))
+	b, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(b)) > max {
-		return nil, fmt.Errorf("more than the limit of %d bytes", max)
+	if int64(len(b)) > limit {
+		return nil, fmt.Errorf("more than the limit of %d bytes", limit)
 	}
 	return b, nil
 }
