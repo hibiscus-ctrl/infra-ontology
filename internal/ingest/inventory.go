@@ -138,9 +138,17 @@ type Resource struct {
 // inventory/v1 or ocsf-inventory/v1 document is an error, and so is one with a
 // resource that lacks a type or an ID.
 func ReadInventory(file string) (Inventory, error) {
-	raw, err := os.ReadFile(file)
+	f, err := os.Open(file)
 	if err != nil {
 		return Inventory{}, err
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, maxInventoryBytes+1))
+	if err != nil {
+		return Inventory{}, err
+	}
+	if int64(len(raw)) > maxInventoryBytes {
+		return Inventory{}, fmt.Errorf("larger than %d bytes, which an inventory file may not be", maxInventoryBytes)
 	}
 	inv, err := ParseInventory(raw)
 	inv.Location = file

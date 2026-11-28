@@ -92,6 +92,8 @@ A test builds a snapshot from inventories that hold secrets in IDs, names, tags,
 
 ## Sources
 
+An inventory file is read only up to 256 MiB; a larger one is a failed source, and the rest of the snapshot is built.
+
 Each file is a `sources` row of kind `inventory`: backend `file`, its path, `collector` `infraharvest` with its version, the time the document says it was made (`generated_at`, or the newest event's time), and `document_sha256`, the hash of what was kept of it. A file that cannot be read, or is not one of the two documents, is a source with status `failed` and a reason, the snapshot is `partial` and the command exits with 3. If nothing could be read, nothing is written and it exits with 1. A file that does not exist is a usage error (2). An inventory that counts resources whose import failed (`coverage.totals.failed`) is `partial` too.
 
 ## What it cannot tell you

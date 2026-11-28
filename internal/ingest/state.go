@@ -39,10 +39,13 @@ import (
 
 // Edge bases written by the state reader.
 const (
-	BasisStateDependency   = "state_dependency"
-	BasisModuleContainment = "module_containment"
-	BasisStateMembership   = "state_membership"
-	BasisRemoteState       = "remote_state"
+	BasisStateDependency = "state_dependency"
+	// BasisStateDependencyGroup is one edge for a dependency between resources
+	// of many instances each (see dependencies).
+	BasisStateDependencyGroup = "state_dependency_group"
+	BasisModuleContainment    = "module_containment"
+	BasisStateMembership      = "state_membership"
+	BasisRemoteState          = "remote_state"
 )
 
 // Read is what one location the user named held: the states in it, or why
@@ -181,8 +184,12 @@ type docState struct {
 	byAddress, byKeyless map[string][]string
 	// calls maps the keyless address of a module call to its nodes.
 	calls map[string][]string
-	// members are the nodes of the instances, in the order of the state.
-	members []member
+	// members are the nodes of the instances, in the order of the state, and
+	// instances the instances they were made of.
+	members   []member
+	instances []tfstate.Instance
+	// depEdges is how many depends_on edges the state made (see maxStateEdges).
+	depEdges int
 }
 
 type member struct {
@@ -219,6 +226,7 @@ type builder struct {
 	stateManaged []string
 
 	credentialIDs, tagsDropped, claimedManaged, mislabelled, tagValuesHashed int
+	cappedInstances, cappedEdges, collapsedDeps                              int
 
 	// key hashes the snapshot, if not nil (see Options.HashKey). raw holds the
 	// ID and ARN a state gave each resource node, as written, to be matched to
@@ -333,7 +341,13 @@ func (b *builder) addDocument(d tfstate.Document) *docState {
 		ManagedStatus: snapshot.Managed, Confidence: snapshot.Observed, SourceID: s.source,
 	})
 
-	for _, in := range d.Instances {
+	instances := d.Instances
+	if len(instances) > maxStateInstances {
+		b.cappedInstances += len(instances) - maxStateInstances
+		instances = instances[:maxStateInstances]
+	}
+	s.instances = instances
+	for _, in := range instances {
 		n := b.instanceNode(s, in)
 		b.addNode(n)
 		s.byAddress[in.Address] = append(s.byAddress[in.Address], n.NodeID)
@@ -456,10 +470,9 @@ func (b *builder) addEdges(s *docState) {
 	for _, m := range s.members {
 		b.addEdge(snapshot.EdgeDefinedIn, BasisStateMembership, snapshot.Observed, m.node.NodeID, s.root, s.source)
 	}
-	for _, in := range s.doc.Instances {
-		for _, id := range s.byAddress[in.Address] {
-			b.dependencies(s, id, in)
-		}
+	for i, in := range s.instances {
+		// By position: instances with no address would share one.
+		b.dependencies(s, s.members[i].node.NodeID, in)
 	}
 	// Module containment: a call is in the call around it, or in the state.
 	// Walk every call of the state once.
@@ -491,16 +504,39 @@ func (b *builder) callID(s *docState, call string) string {
 }
 
 // dependencies adds an edge from an instance to each instance, data source or
-// module the state says it depends on.
+// module the state says it depends on. A dependency between resources of
+// several instances each would be an edge for every pair: past
+// maxDependencyFanout pairs it is one edge, from the first instance of the
+// resource that depends to the first of the one it depends on (basis
+// state_dependency_group, computed: the state names the resources, not which
+// instance needs which). An instance with no address is its own group.
 func (b *builder) dependencies(s *docState, from string, in tfstate.Instance) {
+	group := []string{from}
+	if in.Address != "" {
+		group = s.byKeyless[keyless(in.Address)]
+	}
 	for _, dep := range in.Dependencies {
 		to := slices.Concat(s.byKeyless[keyless(dep)], s.calls[keyless(dep)])
 		if len(to) == 0 {
 			b.unresolved++
 			continue
 		}
+		kind, basis, conf := snapshot.EdgeDependsOn, BasisStateDependency, snapshot.Observed
+		if len(group)*len(to) > maxDependencyFanout {
+			if len(group) > 0 && group[0] != from {
+				continue
+			}
+			to = to[:1]
+			basis, conf = BasisStateDependencyGroup, snapshot.Computed
+			b.collapsedDeps++
+		}
 		for _, id := range to {
-			b.addEdge(snapshot.EdgeDependsOn, BasisStateDependency, snapshot.Observed, from, id, s.source)
+			if s.depEdges >= maxStateEdges {
+				b.cappedEdges++
+				continue
+			}
+			s.depEdges++
+			b.addEdge(kind, basis, conf, from, id, s.source)
 		}
 	}
 }
@@ -609,6 +645,15 @@ func (b *builder) limits() string {
 	if b.unresolved > 0 {
 		s = append(s, strconv.Itoa(b.unresolved)+" dependencies name an address the state does not hold and are left out.")
 	}
+	if b.collapsedDeps > 0 {
+		s = append(s, fmt.Sprintf("%d dependencies between resources of many instances each (more than %d pairs) were collapsed to one edge, from the first instance of the one to the first of the other, with the basis %s.", b.collapsedDeps, maxDependencyFanout, BasisStateDependencyGroup))
+	}
+	if b.cappedInstances > 0 {
+		s = append(s, fmt.Sprintf("%d instances are past the cap of %d per state and are left out.", b.cappedInstances, maxStateInstances))
+	}
+	if b.cappedEdges > 0 {
+		s = append(s, fmt.Sprintf("%d dependency edges are past the cap of %d per state and are left out.", b.cappedEdges, maxStateEdges))
+	}
 	if b.duplicates > 0 {
 		s = append(s, strconv.Itoa(b.duplicates)+" resources are held by more than one state and are listed once, under the first state read.")
 	}
@@ -669,3 +714,20 @@ var freeTextProviders = map[string]bool{
 	"random": true, "http": true, "external": true, "local": true,
 	"null": true, "time": true, "archive": true, "tls": true,
 }
+
+// The bounds of what one state, and one inventory file, may make: the work a
+// document can ask for is not in proportion to its size, since a dependency on
+// a resource of many instances is an edge to each. Past a bound the rest is
+// counted in the manifest's limits and left out.
+var (
+	// maxStateInstances is the most instances of one state that are read.
+	maxStateInstances = 200000
+	// maxStateEdges is the most depends_on edges one state makes.
+	maxStateEdges = 1000000
+	// maxDependencyFanout is the most edges one dependency between two
+	// resources makes (instances of the one times instances of the other): a
+	// dependency of more is collapsed to one edge between the first instances.
+	maxDependencyFanout = 64
+	// maxInventoryBytes is the largest inventory file read.
+	maxInventoryBytes int64 = 256 << 20
+)
